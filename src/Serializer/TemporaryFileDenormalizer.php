@@ -2,17 +2,17 @@
 
 namespace Limas\Serializer;
 
-use ApiPlatform\Core\Api\IriConverterInterface;
-use ApiPlatform\Core\Api\ResourceClassResolverInterface;
-use ApiPlatform\Core\DataProvider\ItemDataProviderInterface;
-use ApiPlatform\Core\Exception\InvalidValueException;
-use ApiPlatform\Core\Exception\ItemNotFoundException;
+use ApiPlatform\Api\IriConverterInterface;
+use ApiPlatform\Api\ResourceClassResolverInterface;
+use ApiPlatform\DataProvider\ItemDataProviderInterface;
+use ApiPlatform\Exception\InvalidValueException;
+use ApiPlatform\Exception\ItemNotFoundException;
 use ApiPlatform\Core\Metadata\Property\Factory\PropertyMetadataFactoryInterface;
-use ApiPlatform\Core\Metadata\Property\Factory\PropertyNameCollectionFactoryInterface;
-use ApiPlatform\Core\Metadata\Property\PropertyMetadata;
-use ApiPlatform\Core\Metadata\Resource\Factory\ResourceMetadataFactoryInterface;
-use ApiPlatform\Core\Security\ResourceAccessCheckerInterface;
-use ApiPlatform\Core\Serializer\AbstractItemNormalizer;
+use ApiPlatform\Metadata\Property\Factory\PropertyNameCollectionFactoryInterface;
+use ApiPlatform\Metadata\Property\PropertyMetadata;
+use ApiPlatform\Metadata\Resource\Factory\ResourceMetadataFactoryInterface;
+use ApiPlatform\Security\ResourceAccessCheckerInterface;
+use ApiPlatform\Serializer\AbstractItemNormalizer;
 use Limas\Annotation\UploadedFile;
 use Limas\Annotation\UploadedFileCollection;
 use Limas\Entity\Image;
@@ -26,10 +26,7 @@ use Symfony\Component\Serializer\Exception\UnexpectedValueException;
 use Symfony\Component\Serializer\Mapping\Factory\ClassMetadataFactoryInterface;
 use Symfony\Component\Serializer\NameConverter\NameConverterInterface;
 use Symfony\Component\Serializer\Normalizer\AbstractNormalizer;
-
-
-class TemporaryFileDenormalizer
-	extends AbstractItemNormalizer
+class TemporaryFileDenormalizer	extends AbstractItemNormalizer
 {
 //	private const FORMAT = 'jsonld';
 
@@ -76,7 +73,7 @@ class TemporaryFileDenormalizer
 	 * @throws ItemNotFoundException
 	 * @throws \ReflectionException
 	 */
-	protected function denormalizeRelation(string $attributeName, PropertyMetadata $propertyMetadata, string $className, $value, ?string $format, array $context): ?object
+	protected function denormalizeRelation(string $attributeName, $propertyMetadata, string $className, $value, ?string $format, array $context)
 	{
 		if ($value !== null) {
 			if ((new \ReflectionClass($className))->isSubclassOf(\Limas\Entity\UploadedFile::class)) {
@@ -95,6 +92,7 @@ class TemporaryFileDenormalizer
 				$context[AbstractNormalizer::OBJECT_TO_POPULATE] = $this->iriConverter->getItemFromIri($value['@id']);
 			}
 		}
+		            // denormalizeRelation(string $attributeName, $propertyMetadata, string $className, $value, ?string $format, array $context)
 		return parent::denormalizeRelation($attributeName, $propertyMetadata, $className, $value, $format, $context);
 	}
 
