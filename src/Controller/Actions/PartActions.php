@@ -21,6 +21,7 @@ use Nette\Utils\Json;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Serializer\Normalizer\AbstractNormalizer;
 use Symfony\Component\Serializer\SerializerInterface;
@@ -160,7 +161,9 @@ class PartActions
 	public function getPartsAction(Request $request, CollectionProvider $dataProvider): iterable
 	{
 		$items = $dataProvider->provide(new GetCollection(class: Part::class));
+		$parts = [];
 		foreach ($items as $part) {
+			$parts[] = $part;
 			if ($part->isMetaPart()) {
 				$sum = 0;
 				$matches = [];
@@ -181,6 +184,14 @@ class PartActions
 			}
 		}
 
+		// Every association in the `default` (list) group is lazy here — this
+		// custom controller goes through CollectionProvider without API
+		// Platform's eager-loading kicking in, so serialising a page of N
+		// parts otherwise fans out an N+1 per relation (category, footprint,
+		// partUnit, storageLocation + its category, and projectParts→project
+		// behind getProjectNames). Prime them all up front for the whole page.
+		$this->primeListAssociations($parts);
+
 		// Optional flat parameter map for custom list-view columns (PK #1217).
 		// Without this the Param Renderer on a column has no PartParameter data
 		// to read — list serialisation strips the `parameters` collection
@@ -192,6 +203,57 @@ class PartActions
 		}
 
 		return $items;
+	}
+
+	/**
+	 * Initialise the list-group associations for a whole page of Parts so
+	 * their serialisation stops firing one lazy SELECT per row per relation.
+	 * Doctrine hydrates the fetch-joined rows into these same managed
+	 * instances and marks the associations/collections initialised.
+	 *
+	 * Two queries: the single-valued chain (ManyToOne category/footprint/
+	 * partUnit/storageLocation + its category, plus the inverse-OneToOne
+	 * storageLocation image — none multiply rows, safe to join together) and
+	 * the projectParts→project OneToMany (kept separate so its row fan-out
+	 * doesn't multiply the scalar columns of the first).
+	 *
+	 * @param Part[] $parts
+	 */
+	private function primeListAssociations(array $parts): void
+	{
+		$ids = [];
+		foreach ($parts as $p) {
+			$pid = $p->getId();
+			if ($pid !== null) {
+				$ids[] = $pid;
+			}
+		}
+		if ($ids === []) {
+			return;
+		}
+
+		$this->entityManager->createQueryBuilder()
+			->select('p', 'cat', 'fp', 'unit', 'sl', 'slcat', 'slimg')
+			->from(Part::class, 'p')
+			->leftJoin('p.category', 'cat')
+			->leftJoin('p.footprint', 'fp')
+			->leftJoin('p.partUnit', 'unit')
+			->leftJoin('p.storageLocation', 'sl')
+			->leftJoin('sl.category', 'slcat')
+			->leftJoin('sl.image', 'slimg')
+			->where('p.id IN (:ids)')
+			->setParameter('ids', $ids)
+			->getQuery()
+			->getResult();
+		$this->entityManager->createQueryBuilder()
+			->select('p', 'pp', 'prj')
+			->from(Part::class, 'p')
+			->leftJoin('p.projectParts', 'pp')
+			->leftJoin('pp.project', 'prj')
+			->where('p.id IN (:ids)')
+			->setParameter('ids', $ids)
+			->getQuery()
+			->getResult();
 	}
 
 	/**
@@ -292,7 +354,51 @@ class PartActions
 		if (!$this->partService->isInternalPartNumberUnique((string)$part->getInternalPartNumber())) {
 			throw new InternalPartNumberNotUniqueException;
 		}
+		// Hard-block duplicates when the admin set mode=block. 'warn' is
+		// advisory and handled by the frontend confirm dialog, so it does
+		// not block here; this stays as the safety net for the block policy
+		// (incl. direct API calls that skip the UI pre-check)
+		if ($this->partService->getDuplicateDetectionMode() === 'block') {
+			$duplicates = $this->partService->findDuplicateParts($part->getName(), $this->firstPartNumber($part));
+			if ($duplicates !== []) {
+				throw new ConflictHttpException(sprintf(
+					'A part matching this name / manufacturer part number already exists (%d found). Duplicate creation is blocked by policy.',
+					count($duplicates)
+				));
+			}
+		}
 		return $part;
+	}
+
+	#[Route(path: '/api/parts/checkDuplicate', defaults: ['method' => 'GET', '_format' => 'json'], priority: 100)]
+	public function checkDuplicateAction(Request $request): JsonResponse
+	{
+		$name = $request->query->getString('name');
+		$mpn = $request->query->getString('mpn');
+		$excludeId = $request->query->getInt('excludeId');
+
+		$excludePart = $excludeId > 0 ? $this->entityManager->find(Part::class, $excludeId) : null;
+		$duplicates = $this->partService->findDuplicateParts($name, $mpn, $excludePart);
+
+		return new JsonResponse([
+			'mode' => $this->partService->getDuplicateDetectionMode(),
+			'duplicates' => array_map(static fn(Part $p): array => [
+				'@id' => '/api/parts/' . $p->getId(),
+				'id' => $p->getId(),
+				'name' => $p->getName()
+			], $duplicates),
+		]);
+	}
+
+	private function firstPartNumber(Part $part): ?string
+	{
+		foreach ($part->getManufacturers() as $partManufacturer) {
+			$pn = $partManufacturer->getPartNumber();
+			if ($pn !== null && trim($pn) !== '') {
+				return $pn;
+			}
+		}
+		return null;
 	}
 
 	public function PartPutAction(Request $request, int $id): Part

@@ -198,14 +198,17 @@ readonly class ReflectionService
 			'ONE_TO_ONE' => [],
 			'MANY_TO_ONE' => [],
 			'ONE_TO_MANY' => [],
-			'MANY_TO_MANY' => [],
+			'MANY_TO_MANY' => []
 		];
 
 		foreach ($cm->getAssociationMappings() as $association) {
 			$getterPlural = false;
-			$associationType = $association['type'];
-
-			switch ($association['type']) {
+			// Doctrine ORM 3.x still allows array access on AssociationMapping,
+			// but ORM 4.x drops it. Read via the typed API so we stay
+			// forward-compatible: type() returns the same ClassMetadata::*
+			// constants, fieldName/targetEntity are public readonly props.
+			$associationType = $association->type();
+			switch ($associationType) {
 				case ClassMetadata::MANY_TO_MANY:
 					$associationType = 'MANY_TO_MANY';
 					$getterPlural = true;
@@ -222,11 +225,11 @@ readonly class ReflectionService
 					break;
 			}
 
-			$getter = 'get' . ucfirst($association['fieldName']);
+			$getter = 'get' . ucfirst($association->fieldName);
 			$getterField = lcfirst($cm->getReflectionClass()->getShortName()) . str_replace(
 					'.',
 					'',
-					$this->convertPHPToExtJSClassName($association['targetEntity'])
+					$this->convertPHPToExtJSClassName($association->targetEntity)
 				);
 
 			if ($getterPlural) {
@@ -237,7 +240,7 @@ readonly class ReflectionService
 			// PropertyAccessor handles mapped-superclass private fields
 			// correctly (e.g. UploadedFile.blob ManyToOne lives on the
 			// abstract parent).
-			$accessor = $cm->getPropertyAccessor($association['fieldName']);
+			$accessor = $cm->getPropertyAccessor($association->fieldName);
 			$attributes = $accessor !== null ? $accessor->getUnderlyingReflector()->getAttributes() : [];
 			foreach ($attributes as $property) {
 				$pi = $property->newInstance();
@@ -248,14 +251,14 @@ readonly class ReflectionService
 
 			// The self-referencing association may not be written for trees, because ExtJS can't load all nodes
 			// in one go.
-			if (!($bTree && $association['targetEntity'] === $cm->getName())) {
+			if (!($bTree && $association->targetEntity === $cm->getName())) {
 				$associationMappings[$associationType][] = [
-					'name' => $association['fieldName'],
+					'name' => $association->fieldName,
 					'nullable' => $nullable,
-					'target' => $this->convertPHPToExtJSClassName($association['targetEntity']),
-					'byReference' => in_array($association['fieldName'], $byReferenceMappings, true),
+					'target' => $this->convertPHPToExtJSClassName($association->targetEntity),
+					'byReference' => in_array($association->fieldName, $byReferenceMappings, true),
 					'getter' => $getter,
-					'getterField' => $getterField,
+					'getterField' => $getterField
 				];
 			}
 		}

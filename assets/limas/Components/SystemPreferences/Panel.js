@@ -9,6 +9,8 @@ Ext.define('Limas.Components.SystemPreferences.Panel', {
 			'Limas.Components.SystemPreferences.Preferences.RequiredPartManufacturerFields',
 			'Limas.Components.SystemPreferences.Preferences.RequiredPartDistributorFields',
 			'Limas.Components.SystemPreferences.Preferences.BarcodeScannerConfiguration',
+			'Limas.Components.SystemPreferences.Preferences.LabelConfiguration',
+			'Limas.Components.SystemPreferences.Preferences.DuplicatePartDetection',
 			'Limas.Components.SystemPreferences.Preferences.ActionsConfiguration'
 		];
 	},

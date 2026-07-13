@@ -60,6 +60,12 @@ final class TmeAdapter
 		return 'tme';
 	}
 
+	public function getAttribution(): string
+	{
+		// TME API Terms §8.7 — exact required wording
+		return 'Data powered by TME.eu Data – no guarantee of data accuracy';
+	}
+
 	public function isConfigured(): bool
 	{
 		return $this->token !== '' && $this->appSecret !== '';

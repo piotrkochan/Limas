@@ -75,6 +75,12 @@ final class OemSecretsAdapter
 		return 'oemsecrets';
 	}
 
+	public function getAttribution(): ?string
+	{
+		// No attribution mandated by OEMSecrets' public terms (a formal API licence may be issued privately at key-request time)
+		return null;
+	}
+
 	public function isConfigured(): bool
 	{
 		return $this->service->isConfigured();
@@ -283,6 +289,7 @@ final class OemSecretsAdapter
 		$mpn = (string)($row['part_number'] ?? '');
 		$dist = $this->distributorName($row);
 		$sku = $this->service->cacheKeyFor($mpn, $dist);
+		[$priceCurrency, $priceLadder] = $this->selectPriceLadder($row['prices'] ?? []);
 		return new InfoProviderResult(
 			source: $this->getName(),
 			sourceSku: $sku,
@@ -298,9 +305,9 @@ final class OemSecretsAdapter
 			lifecycleStatus: ManufacturingStatus::fromRaw($this->trimOrNull($row['life_cycle'] ?? null)),
 			stock: isset($row['quantity_in_stock']) ? (int)$row['quantity_in_stock'] : null,
 			datasheetUrl: $this->trimOrNull($row['datasheet_url'] ?? null),
-			currency: $this->currency,
+			currency: $priceCurrency ?? $this->currency,
 			parameters: $this->mapParameters($row),
-			priceBreaks: $this->mapPriceBreaks($row['prices'] ?? []),
+			priceBreaks: $this->mapPriceBreaks($priceLadder),
 			rawSource: ['oemsecrets_distributor' => $dist, 'row' => $row]
 		);
 	}
@@ -334,26 +341,36 @@ final class OemSecretsAdapter
 	}
 
 	/**
-	 * Prices come as `{currency: [{unit_break, unit_price}, ...]}`. We
-	 * prefer our configured target currency; if missing, fall back to the
-	 * row's `source_currency` ladder so the user still sees a price column
-	 * (just in the original currency).
+	 * Prices come as `{currency: [{unit_break, unit_price}, ...]}`. Pick the
+	 * ladder for our configured target currency; if it's missing, fall back to
+	 * whichever currency the response contains first so the user still sees a
+	 * price column. Returns `[currency, ladder]` — the currency the ladder is
+	 * ACTUALLY in — so the caller can label the breaks correctly. Labelling a
+	 * USD-only fallback as our configured EUR would show/store the wrong money.
+	 *
+	 * @param array $prices
+	 * @return array{0: ?string, 1: array}
 	 */
-	private function mapPriceBreaks(array $prices): array
+	private function selectPriceLadder(array $prices): array
 	{
-		$ladder = $prices[$this->currency] ?? $prices[strtoupper($this->currency)] ?? null;
-		if (!is_array($ladder) || $ladder === []) {
-			// Fall back to whichever currency the response contains first.
-			foreach ($prices as $rows) {
-				if (is_array($rows) && $rows !== []) {
-					$ladder = $rows;
-					break;
-				}
+		foreach ([$this->currency, strtoupper($this->currency)] as $key) {
+			if (is_array($prices[$key] ?? null) && $prices[$key] !== []) {
+				return [strtoupper($this->currency), $prices[$key]];
 			}
 		}
-		if (!is_array($ladder)) {
-			return [];
+		foreach ($prices as $currency => $rows) {
+			if (is_array($rows) && $rows !== []) {
+				return [is_string($currency) ? strtoupper($currency) : null, $rows];
+			}
 		}
+		return [null, []];
+	}
+
+	/**
+	 * @param array $ladder A single-currency ladder from selectPriceLadder()
+	 */
+	private function mapPriceBreaks(array $ladder): array
+	{
 		$out = [];
 		foreach ($ladder as $row) {
 			$qty = $row['unit_break'] ?? null;

@@ -111,6 +111,18 @@ class UploadedFileService
 
 	public function replaceFromURL(UploadedFile $file, string $url, ?HeaderBag $headers = null, ?string $adapter = null): void
 	{
+		// A data: URI carries the payload inline, so there is no network fetch
+		// and nothing for the URL/SSRF guards to check (no host to resolve).
+		// Decode it in-process and funnel into the same replaceFromData() sink
+		// every other upload path uses — SVG sanitisation, MIME detection, CAS
+		// and the executable-extension blacklist (Entity\UploadedFile::
+		// setOriginalFilename) all still apply. Capability-equivalent to a
+		// plain userfile upload; it grants the caller nothing new.
+		if (preg_match('#^\s*data:#i', $url) === 1) {
+			$this->replaceFromDataUri($file, $url);
+			return;
+		}
+
 		Validators::assert($url, 'url');
 		// `requireTld: true` becomes the default in symfony/validator 8.0;
 		// pass it explicitly so the 7.x deprecation warning stays quiet.
@@ -118,7 +130,7 @@ class UploadedFileService
 		// TLD requirement is the right semantic anyway.
 		Validation::createCallable(new Url(requireTld: true))($url);
 		Validation::createCallable(new NotBlank, new Hostname)($host = rawurldecode(parse_url($url)['host'] ?? ''));
-		$this->assertHostIsPublic($host);
+		$vettedIps = $this->assertHostIsPublic($host);
 
 		$origin = isset(parse_url($url)['scheme'], parse_url($url)['host'])
 			? parse_url($url)['scheme'] . '://' . parse_url($url)['host'] . '/'
@@ -126,9 +138,26 @@ class UploadedFileService
 
 		$options = [
 			RequestOptions::TIMEOUT => 30,
+			// Stream the body so we can enforce a byte ceiling as it arrives
+			// (see the capped read below) instead of buffering an unbounded /
+			// decompression-bomb response into memory first
+			RequestOptions::STREAM => true,
 			RequestOptions::ALLOW_REDIRECTS => [
 				'max' => 5,
-				'referer' => true
+				'referer' => true,
+				'protocols' => ['http', 'https'],
+				// Re-run the SSRF guard on EVERY redirect hop. Validating only
+				// the initial host is useless if a public host can 302 us to
+				// an internal target (cloud metadata, 127.0.0.1, RFC1918).
+				// Throwing here aborts the transfer before the internal
+				// response is ever read.
+				'on_redirect' => function (
+					\Psr\Http\Message\RequestInterface  $request,
+					\Psr\Http\Message\ResponseInterface $response,
+					\Psr\Http\Message\UriInterface      $uri
+				): void {
+					$this->assertHostIsPublic(rawurldecode($uri->getHost()));
+				}
 			],
 			RequestOptions::HEADERS => array_filter([
 				'User-Agent' => $headers?->get('User-Agent') ?? 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
@@ -152,23 +181,58 @@ class UploadedFileService
 			], static fn($v) => $v !== null)
 		];
 
+		// Pin the connection to an already-vetted IP so curl cannot re-resolve
+		// the host to an internal address between the SSRF check and the
+		// connect (DNS rebinding). Only for hostnames — a literal-IP host is
+		// already the concrete target.
+		if ($vettedIps !== [] && filter_var($host, FILTER_VALIDATE_IP) === false) {
+			$scheme = strtolower((string)parse_url($url, PHP_URL_SCHEME));
+			$port = parse_url($url, PHP_URL_PORT) ?? ($scheme === 'http' ? 80 : 443);
+			$options['curl'][CURLOPT_RESOLVE] = array_map(
+				static fn(string $ip): string => sprintf('%s:%d:%s', $host, $port, $ip),
+				$vettedIps
+			);
+		}
+
 		try {
 			$response = (new Client)->request('GET', $url, $options);
 		} catch (GuzzleException $e) {
 			if ($this->shouldRetryWithTls13($e)) {
 				try {
 					$retryOptions = $options;
-					$retryOptions['curl'] = [CURLOPT_SSLVERSION => CURL_SSLVERSION_TLSv1_3];
+					// Preserve the CURLOPT_RESOLVE pin (and any other curl opts)
+					// while adding the TLS 1.3 fallback.
+					$retryOptions['curl'] = ($options['curl'] ?? []) + [CURLOPT_SSLVERSION => CURL_SSLVERSION_TLSv1_3];
 					$response = (new Client)->request('GET', $url, $retryOptions);
 				} catch (GuzzleException $e2) {
-					throw new \RuntimeException('replaceFromURL error: ' . str_replace(['>', '<'], '', $e2->getMessage()), $e2->getCode(), $e2);
+					// Log the upstream detail (URL, DNS/connection error) server
+					// side; return a generic message so the client can't use the
+					// error as an SSRF probe / internal-path oracle. Keep the
+					// code so isRecoverableDownloadError() still classifies it.
+					$this->logger->warning('replaceFromURL failed for {url}: {err}', ['url' => $url, 'err' => $e2->getMessage()]);
+					throw new \RuntimeException('Could not download the file from the given URL.', $e2->getCode(), $e2);
 				}
 			} else {
-				throw new \RuntimeException('replaceFromURL error: ' . str_replace(['>', '<'], '', $e->getMessage()), $e->getCode(), $e);
+				$this->logger->warning('replaceFromURL failed for {url}: {err}', ['url' => $url, 'err' => $e->getMessage()]);
+				throw new \RuntimeException('Could not download the file from the given URL.', $e->getCode(), $e);
 			}
 		}
 
-		$data = (string)$response->getBody();
+		// Read the (already gzip/br-decoded) body in chunks with a hard cap so
+		// a hostile origin can't exhaust worker memory with a huge or
+		// decompression-bomb response. Reuse the configured upload limit;
+		// fall back to 64 MiB when uploads are unlimited.
+		$maxBytes = (isset($this->limas['upload']['limit']) && $this->limas['upload']['limit'] !== false)
+			? (int)$this->limas['upload']['limit']
+			: 64 * 1024 * 1024;
+		$stream = $response->getBody();
+		$data = '';
+		while (!$stream->eof()) {
+			$data .= $stream->read(65536);
+			if (strlen($data) > $maxBytes) {
+				throw new \RuntimeException('The downloaded file exceeds the maximum allowed size.');
+			}
+		}
 		$contentType = $response->getHeaderLine('Content-Type');
 		$contentDisposition = $response->getHeaderLine('Content-Disposition');
 		$this->replaceFromData($file, $data, $this->resolveDownloadFilename($url, $contentType, $contentDisposition));
@@ -182,6 +246,40 @@ class UploadedFileService
 			$file->setSourceUrl(null);
 			$file->setSourceAdapter(null);
 		}
+	}
+
+	/**
+	 * Decode an RFC 2397 data: URI (`data:[<mediatype>][;base64],<data>`) into
+	 * bytes and store them like any other upload. Parsed by hand + base64
+	 * (never handed to a stream wrapper) so there is no data://, php:// or
+	 * file:// exposure. No network, so no SSRF surface. All downstream content
+	 * safety — SVG sanitisation, MIME sniffing, CAS dedup, executable-extension
+	 * stripping — runs via replaceFromData()/setOriginalFilename() exactly as
+	 * for a userfile upload.
+	 */
+	private function replaceFromDataUri(UploadedFile $file, string $url): void
+	{
+		if (preg_match('#^\s*data:([^,]*),(.*)$#is', $url, $m) !== 1) {
+			throw new \RuntimeException('Malformed data: URI');
+		}
+
+		$parameters = $m[1] === '' ? [] : explode(';', $m[1]);
+		$mimetype = (isset($parameters[0]) && str_contains($parameters[0], '/'))
+			? strtolower(trim($parameters[0]))
+			: 'application/octet-stream';
+		$isBase64 = in_array('base64', array_map('strtolower', array_map('trim', $parameters)), true);
+
+		if ($isBase64) {
+			$bytes = base64_decode($m[2], true);
+			if ($bytes === false) {
+				throw new \RuntimeException('Invalid base64 payload in data: URI');
+			}
+		} else {
+			$bytes = rawurldecode($m[2]);
+		}
+
+		$extension = $this->extensionFromMime($mimetype);
+		$this->replaceFromData($file, $bytes, 'upload' . ($extension !== null ? '.' . $extension : ''));
 	}
 
 	/**
@@ -352,7 +450,15 @@ class UploadedFileService
 	 * eliminating that would need a curl_opensocket_function hook that
 	 * gates the resolved IP per-connection.
 	 */
-	private function assertHostIsPublic(string $host): void
+	/**
+	 * Validate that every address $host resolves to is public, and return the
+	 * vetted addresses so the caller can pin the connection to one of them
+	 * (closing the DNS-rebinding TOCTOU — otherwise curl re-resolves at
+	 * connect time and could land on an internal IP)
+	 *
+	 * @return list<string> the vetted public IP(s) (the literal itself for an IP host)
+	 */
+	private function assertHostIsPublic(string $host): array
 	{
 		if ($host === '') {
 			throw new \InvalidArgumentException('Cannot upload files: empty host');
@@ -388,12 +494,22 @@ class UploadedFileService
 				throw new \InvalidArgumentException('Cannot upload files from a private/loopback host');
 			}
 		}
+
+		return $candidates;
 	}
 
 	private function isPrivateIp(string $ip): bool
 	{
-		if (preg_match('/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i', $ip, $m) === 1) {
-			$ip = $m[1];
+		// Unwrap IPv4-mapped IPv6 in BOTH notations — dotted (::ffff:127.0.0.1)
+		// and hextet (::ffff:7f00:1) — before the IPv4 range checks. The old
+		// dotted-decimal-only regex let the hextet form (a valid IPv6 that
+		// routes to the embedded IPv4 on Linux) slip past as "public".
+		$packed = @inet_pton($ip);
+		if ($packed !== false && strlen($packed) === 16 && str_starts_with($packed, "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff")) {
+			$unwrapped = @inet_ntop(substr($packed, 12));
+			if ($unwrapped !== false) {
+				$ip = $unwrapped;
+			}
 		}
 		if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
 			return true;
@@ -417,7 +533,7 @@ class UploadedFileService
 			'::1/128',
 			'fc00::/7',
 			'fe80::/10',
-			'ff00::/8',
+			'ff00::/8'
 		];
 		return IpUtils::checkIp($ip, $privateRanges);
 	}

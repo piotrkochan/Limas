@@ -4,18 +4,26 @@ namespace Limas\Service;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Limas\Entity\Part;
+use Limas\Entity\PartManufacturer;
 use Limas\Entity\PartParameter;
 use Limas\Exceptions\NotAMetaPartException;
+use Limas\Exceptions\SystemPreferenceNotFoundException;
 use Limas\Filter\Filter;
 
 
 readonly class PartService
 {
+	private const string PREF_DUP_MODE = 'limas.part.duplicateDetection.mode';
+	private const string PREF_DUP_CHECK_NAME = 'limas.part.duplicateDetection.checkName';
+	private const string PREF_DUP_CHECK_MPN = 'limas.part.duplicateDetection.checkMpn';
+
+
 	public function __construct(
-		private EntityManagerInterface $entityManager,
-		private FilterService          $filterService,
-		private array                  $limas,
-		private int|bool               $partLimit = false
+		private EntityManagerInterface  $entityManager,
+		private FilterService           $filterService,
+		private SystemPreferenceService $systemPreferenceService,
+		private array                   $limas,
+		private int|bool                $partLimit = false
 	)
 	{
 	}
@@ -47,6 +55,103 @@ readonly class PartService
 		return $this->partLimit !== false
 			&& $this->partLimit !== -1
 			&& $this->getPartCount() >= $this->partLimit;
+	}
+
+	/**
+	 * Duplicate-part detection mode: 'off' | 'warn' | 'block'. Admin-set via
+	 * SystemPreferences; anything unrecognised is treated as 'off'
+	 */
+	public function getDuplicateDetectionMode(): string
+	{
+		$mode = $this->stringPref(self::PREF_DUP_MODE, 'off');
+		return in_array($mode, ['warn', 'block'], true) ? $mode : 'off';
+	}
+
+	/**
+	 * Find existing Parts that collide with the given name and/or
+	 * manufacturer part number, honouring the checkName / checkMpn
+	 * preferences. Returns an empty array when detection is off or nothing
+	 * matches. `$excludePart` (its id) is left out so edit flows don't match
+	 * the part against itself.
+	 *
+	 * @return Part[]
+	 */
+	public function findDuplicateParts(?string $name, ?string $mpn, ?Part $excludePart = null): array
+	{
+		if ($this->getDuplicateDetectionMode() === 'off') {
+			return [];
+		}
+
+		$checkName = $this->boolPref(self::PREF_DUP_CHECK_NAME, true);
+		$checkMpn = $this->boolPref(self::PREF_DUP_CHECK_MPN, true);
+		$name = trim((string)$name);
+		$mpn = trim((string)$mpn);
+
+		$qb = $this->entityManager->getRepository(Part::class)->createQueryBuilder('p');
+		$or = $qb->expr()->orX();
+		if ($checkName && $name !== '') {
+			$or->add($qb->expr()->eq('LOWER(p.name)', ':dupName'));
+			$qb->setParameter('dupName', mb_strtolower($name));
+		}
+		if ($checkMpn && $mpn !== '') {
+			// Correlated EXISTS instead of a join — no row multiplication,
+			// no GROUP BY, and the DQL stays self-contained
+			$sub = $this->entityManager->createQueryBuilder()
+				->select('1')
+				->from(PartManufacturer::class, 'pm')
+				->where('pm.part = p')
+				->andWhere('LOWER(pm.partNumber) = :dupMpn');
+			$or->add($qb->expr()->exists($sub->getDQL()));
+			$qb->setParameter('dupMpn', mb_strtolower($mpn));
+		}
+		if ($or->count() === 0) {
+			return [];
+		}
+
+		$qb->andWhere($or);
+		if ($excludePart !== null && $excludePart->getId() !== null) {
+			$qb->andWhere($qb->expr()->neq('p.id', ':excludeId'))
+				->setParameter('excludeId', $excludePart->getId());
+		}
+
+		return $qb->getQuery()->getResult();
+	}
+
+	/**
+	 * SystemPreferences are JSON-encoded by the frontend, so a string lands
+	 * as `"warn"` and a bool as `true`; decode before use
+	 */
+	private function decodedPref(string $key): mixed
+	{
+		$raw = $this->systemPreferenceService->getSystemPreferenceValue($key);
+		$decoded = json_decode($raw, true);
+		return json_last_error() === JSON_ERROR_NONE ? $decoded : $raw;
+	}
+
+	private function stringPref(string $key, string $default): string
+	{
+		try {
+			$value = $this->decodedPref($key);
+			return is_scalar($value) ? trim((string)$value) : $default;
+		} catch (SystemPreferenceNotFoundException) {
+			return $default;
+		}
+	}
+
+	private function boolPref(string $key, bool $default): bool
+	{
+		try {
+			$value = $this->decodedPref($key);
+			if (is_bool($value)) {
+				return $value;
+			}
+			if (is_string($value)) {
+				return $value === 'true' || $value === '1';
+			}
+			return (bool)$value;
+		} catch (SystemPreferenceNotFoundException) {
+			return $default;
+		}
 	}
 
 	/**

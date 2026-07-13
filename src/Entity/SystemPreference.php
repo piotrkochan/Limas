@@ -27,6 +27,7 @@ use Symfony\Component\Serializer\Attribute\Groups;
 		new Delete(
 			uriTemplate: 'system_preferences',
 			controller: SystemPreferenceActions::class . '::deleteAction',
+			security: "is_granted('ROLE_ADMIN')",
 			name: 'SystemPreferenceDelete'
 		),
 		new Get(
@@ -62,7 +63,10 @@ class SystemPreference
 
 	public function getPreferenceValue(): mixed
 	{
-		return unserialize($this->preferenceValue);
+		// Preferences only ever hold JSON-decoded scalars/arrays, never
+		// objects — forbid object instantiation so a tampered/legacy value
+		// can't turn into a POP gadget
+		return unserialize($this->preferenceValue, ['allowed_classes' => false]);
 	}
 
 	public function setPreferenceValue(mixed $preferenceValue): self

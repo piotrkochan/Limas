@@ -1,5 +1,10 @@
 gesdinet_jwt_refresh_token:
     refresh_token_class: Limas\Entity\RefreshToken
+    # 7 days (was the 30-day default) caps how long a stolen refresh token is
+    # useful. single_use rotates it on every refresh (the old one is deleted),
+    # so a captured refresh token is good for at most one use.
+    ttl: 604800
+    single_use: true
     cookie:
         enabled: true
         same_site: lax # default lax

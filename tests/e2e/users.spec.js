@@ -9,12 +9,19 @@ async function openUsersPanel(page) {
 		Limas.getApplication().openAppItem('Limas.UserEditorComponent');
 	});
 
-	// Wait for panel and grid to be ready
+	// Wait for the panel, the grid store, AND the UserProviderStore. The latter
+	// autoloads at app startup; the editor's Save resolves the builtin provider
+	// from it, so a create fired before it finishes loading POSTs provider:null
+	// and the backend rejects it (the new user then never lands in the grid).
+	// A slower backend (IP-validation mode) loses this race — hence the wait.
 	await page.waitForFunction(() => {
 		const panel = Ext.ComponentQuery.query('UserEditorComponent')[0];
 		const grid = Ext.ComponentQuery.query('UserGrid')[0];
-		return panel && panel.isVisible() && grid && grid.getStore().isLoaded();
-	}, {timeout: 5000});
+		const providerStore = Ext.data.StoreManager.lookup('UserProviderStore');
+		return panel && panel.isVisible()
+			&& grid && grid.getStore().isLoaded()
+			&& providerStore && providerStore.isLoaded();
+	}, {timeout: 10000});
 }
 
 test.describe('Limas Users Administration', () => {
@@ -260,9 +267,11 @@ test.describe('Limas Users Administration', () => {
 				grid.deleteButton.fireHandler();
 			});
 
-			// Wait for confirm dialog and click Yes
+			// Wait for confirm dialog and click Yes via the Ext API — a DOM click
+			// on the confirm button is unreliable when a floating window/toast
+			// overlays it (esp. against a real instance in url mode)
 			await page.waitForFunction(() => Ext.Msg.isVisible(), {timeout: 3000});
-			await page.click('span.x-btn-inner:text("Yes")');
+			await page.evaluate(() => Ext.Msg.down('#yes').fireHandler());
 
 			// Wait for dialog to close and user to disappear from grid
 			await page.waitForFunction(() => !Ext.Msg.isVisible(), {timeout: 5000});

@@ -87,3 +87,34 @@ php bin/console doctrine:fixtures:load --group=parameter-taxonomy --append
 flag on the import command (see `documentation/Installation.md`), which
 loads the taxonomy and also seeds Manufacturer aliases + backfills
 parameter canonicals and numeric values from the imported data.
+
+## Legal / distributor attribution
+
+Some distributor API terms require you to credit them wherever their data
+is shown. The aggregator renders a per-source attribution line under each
+distributor's block in the results detail panel, driven by
+`InfoProviderInterface::getAttribution()`:
+
+- **TME** — `Data powered by TME.eu Data – no guarantee of data accuracy`
+  (their §8.7, exact wording).
+- **DigiKey** — `Data provided by DigiKey` (§3.1.4 requires a clear,
+  conspicuous source credit; no fixed string mandated).
+- **Farnell / Newark / element14** — `Data provided by … (Premier Farnell)`
+  (§5).
+- **LCSC** (community jlcsearch + public endpoints) and **OEMSecrets** impose
+  no attribution obligation, so they render none.
+
+TME and DigiKey also want product-photo watermarks left intact — Limas'
+CAS stores the fetched bytes as-is and never re-encodes, so that holds.
+
+**A note on the element14/DigiKey "no caching / no own-database" clauses.**
+Read literally, element14 §4 ("you will not … store any portion of the
+Farnell Content") and DigiKey §5.1 ("build/update your own database") would
+make any inventory tool impossible. The intent is clearly to stop someone
+bulk-scraping the whole catalogue and re-selling it as a competing data
+service. Limas is a **self-hosted, bring-your-own-key** tool that stores only
+the handful of parts a user chooses to keep as local records — not a 1:1 dump
+or a data product. Each deployment's own API key means the distributor's terms
+bind **the deployer**, who is responsible for their own compliance. Keeping the
+per-source attribution + provenance visible (rather than anonymously blending
+sources) is what the terms actually care about.

@@ -95,6 +95,9 @@ class UserPreference
 
 	public function getPreferenceValue(): mixed
 	{
-		return unserialize($this->preferenceValue);
+		// Preferences only ever hold JSON-decoded scalars/arrays, never
+		// objects — forbid object instantiation so a tampered/legacy value
+		// can't turn into a POP gadget
+		return unserialize($this->preferenceValue, ['allowed_classes' => false]);
 	}
 }

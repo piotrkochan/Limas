@@ -24,10 +24,25 @@ use Limas\Entity\PartManufacturer;
  *  4. Return null — caller (importer) creates a new Manufacturer and assigns
  *     it to the pending alias
  */
-readonly class ManufacturerCanonicalizer
+class ManufacturerCanonicalizer
 {
+	/**
+	 * Per-request memo of resolved canonical manufacturers, keyed by the
+	 * normalized name. Only SUCCESSFUL (non-null) resolutions are cached:
+	 * an aggregator search/import fans out many candidates sharing the same
+	 * manufacturer, and without this each repeat did a fresh alias lookup +
+	 * a full em->flush() (usageCount bump). Misses are deliberately NOT
+	 * cached — the importer creates a Manufacturer + registerAlias() on a
+	 * miss, and a stale null would make the next candidate create a DUPLICATE
+	 * manufacturer. registerAlias()/mergeInto() keep this map coherent.
+	 *
+	 * @var array<string, Manufacturer>
+	 */
+	private array $memo = [];
+
+
 	public function __construct(
-		private EntityManagerInterface $em
+		private readonly EntityManagerInterface $em
 	)
 	{
 	}
@@ -39,6 +54,12 @@ readonly class ManufacturerCanonicalizer
 			return null;
 		}
 
+		if (isset($this->memo[$key])) {
+			// Already resolved this request — no query, no flush. The first
+			// resolution already bumped usageCount once for this request.
+			return $this->memo[$key];
+		}
+
 		// 1) alias lookup
 		$alias = $this->em->getRepository(ManufacturerAlias::class)
 			->findOneBy(['aliasNormalized' => $key]);
@@ -47,7 +68,11 @@ readonly class ManufacturerCanonicalizer
 			$this->em->flush();
 			// Alias hit but manufacturer not assigned yet → admin must verify;
 			// canonicalize stays a miss from the caller's perspective
-			return $alias->getManufacturer();
+			$manufacturer = $alias->getManufacturer();
+			if ($manufacturer !== null) {
+				$this->memo[$key] = $manufacturer;
+			}
+			return $manufacturer;
 		}
 
 		// 2) direct name match → register a verified alias for next time
@@ -61,6 +86,7 @@ readonly class ManufacturerCanonicalizer
 			->getOneOrNullResult();
 		if ($direct instanceof Manufacturer) {
 			$this->registerAliasInternal($rawName, $key, $direct, ManufacturerAlias::SOURCE_AUTO, verified: true);
+			$this->memo[$key] = $direct;
 			return $direct;
 		}
 
@@ -90,6 +116,8 @@ readonly class ManufacturerCanonicalizer
 				$existing->setManufacturer($manufacturer);
 				$existing->setVerified(true);
 				$this->em->flush();
+				// Keep the resolve memo coherent: the importer's miss→create→registerAlias flow now resolves this key on the next candidate
+				$this->memo[$normalized] = $manufacturer;
 				return $existing;
 			}
 			if ($existing->getManufacturer()->getId() !== $manufacturer->getId()) {
@@ -102,9 +130,11 @@ readonly class ManufacturerCanonicalizer
 					$manufacturer->getName()
 				));
 			}
+			$this->memo[$normalized] = $manufacturer;
 			return $existing;
 		}
 
+		$this->memo[$normalized] = $manufacturer;
 		return $this->registerAliasInternal($rawAlias, $normalized, $manufacturer, ManufacturerAlias::SOURCE_USER, verified: true);
 	}
 
@@ -130,7 +160,7 @@ readonly class ManufacturerCanonicalizer
 		$conn = $this->em->getConnection();
 		$conn->beginTransaction();
 		try {
-			$reassigned = (int)$this->em->createQueryBuilder()
+			$reassigned = $this->em->createQueryBuilder()
 				->update(PartManufacturer::class, 'pm')
 				->set('pm.manufacturer', ':target')
 				->where('pm.manufacturer = :source')
@@ -177,6 +207,8 @@ readonly class ManufacturerCanonicalizer
 			$this->em->remove($source);
 			$this->em->flush();
 			$conn->commit();
+			// A merge remaps source's spellings onto target — drop the resolve memo so no stale source→Manufacturer mapping survives
+			$this->memo = [];
 			return $reassigned;
 		} catch (\Throwable $e) {
 			$conn->rollBack();
@@ -213,12 +245,36 @@ readonly class ManufacturerCanonicalizer
 	 *   - trim
 	 *   - collapse runs of whitespace to single space
 	 *   - lowercase
+	 *   - strip trailing corporate suffixes (Inc, Ltd, GmbH, …) so e.g.
+	 *     "Bivar" / "Bivar Inc." / "Bivar Inc" all collapse to one key
 	 * Static so the InfoProviderMerger can use it as a fallback grouping key
 	 * without depending on the entity manager
 	 */
 	public static function normalize(string $name): string
 	{
 		$collapsed = preg_replace('/\s+/u', ' ', trim($name));
-		return mb_strtolower($collapsed ?? $name);
+		$lower = mb_strtolower($collapsed ?? $name);
+		return self::stripCorporateSuffixes($lower);
+	}
+
+	/**
+	 * Repeatedly strips trailing corporate-form suffixes so chained forms
+	 * like "Samsung Electronics Co., Ltd." collapse all the way down to
+	 * "samsung electronics". Requires whitespace or comma before the suffix
+	 * and anchors to end-of-string, so legitimate names containing these
+	 * substrings inside a word ("Coca-Cola") and MPN tokens never false-
+	 * positive
+	 */
+	private static function stripCorporateSuffixes(string $name): string
+	{
+		static $pattern = '/[\s,]+(?:inc|incorporated|llc|l\.l\.c\.|ltd|limited|corp|corporation|company|co|gmbh|mbh|ag|kg|kgaa|ab|bv|b\.v\.|nv|n\.v\.|sa|s\.a\.|spa|s\.p\.a\.|sl|s\.l\.|plc|p\.l\.c\.)\.?\s*$/iu';
+		while (true) {
+			$stripped = preg_replace($pattern, '', $name) ?? $name;
+			if ($stripped === $name || $stripped === '') {
+				break;
+			}
+			$name = $stripped;
+		}
+		return $name;
 	}
 }

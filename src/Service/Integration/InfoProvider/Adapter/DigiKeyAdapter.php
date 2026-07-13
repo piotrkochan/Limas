@@ -77,6 +77,13 @@ final readonly class DigiKeyAdapter
 		return 'digikey';
 	}
 
+	public function getAttribution(): string
+	{
+		// DigiKey API User Agreement §3.1.4 — "clearly and conspicuously
+		// attribute DigiKey as the source of all DigiKey Data" (no fixed string)
+		return 'Data provided by DigiKey';
+	}
+
 	public function isConfigured(): bool
 	{
 		return $this->clientId !== '' && $this->clientSecret !== '';

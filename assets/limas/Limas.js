@@ -651,6 +651,51 @@ Limas.getBasePath = function () {
 	return href;
 };
 
+/**
+ * POST {parts: [...ids], storageLocations: [...ids]} to /api/labels/sheet,
+ * open the returned SVG label sheet in a new window and trigger the print
+ * dialog. Either ID array may be empty; the backend rejects fully empty.
+ */
+Limas.printLabelSheet = function (payload) {
+	Ext.Ajax.request({
+		url: Limas.getBasePath() + '/api/labels/sheet',
+		method: 'POST',
+		jsonData: payload,
+		headers: Ext.apply({
+			'Content-Type': 'application/json'
+		}, Limas.Auth.AuthenticationProvider.getAuthenticationProvider().getHeaders()),
+		success: function (response) {
+			let html = response.responseText,
+				w = window.open('', '_blank', 'width=900,height=700');
+			if (!w) {
+				Ext.Msg.alert(i18n('Print'), i18n('Could not open a popup window — allow popups for Limas and try again.'));
+				return;
+			}
+			// The backend response is a complete HTML document with page
+			// wrappers, print CSS and multi-page break rules. Dump it into
+			// the popup and print after one tick so the SVGs lay out first.
+			w.document.open();
+			w.document.write(html);
+			w.document.close();
+			w.focus();
+			setTimeout(function () {
+				w.print();
+			}, 250);
+		},
+		failure: function (response) {
+			let msg = i18n('Could not generate labels');
+			try {
+				let body = Ext.decode(response.responseText);
+				if (body && body.error) {
+					msg += ': ' + body.error;
+				}
+			} catch (e) { // ignore
+			}
+			Ext.Msg.alert(i18n('Print'), msg);
+		}
+	});
+};
+
 Limas.setMaxUploadSize = function (size) {
 	Limas.maxUploadSize = size;
 };

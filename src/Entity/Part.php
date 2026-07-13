@@ -25,6 +25,9 @@ use Symfony\Component\Validator\Constraints as Assert;
 
 #[ORM\Entity]
 #[ORM\HasLifecycleCallbacks]
+// PartService::isInternalPartNumberUnique does an equality lookup on every
+// part create/edit; without this it full-scans the Part table each save
+#[ORM\Index(name: 'idx_part_internalpartnumber', columns: ['internalPartNumber'], options: ['lengths' => [191]])]
 #[ApiResource(
 	operations: [
 		new GetCollection(

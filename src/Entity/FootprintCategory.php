@@ -21,6 +21,7 @@ use Limas\Entity\Traits\Tree;
 
 #[ORM\Entity(repositoryClass: NestedTreeRepository::class)]
 #[ORM\Index(fields: ['lft']), ORM\Index(fields: ['rgt'])]
+#[ORM\Index(name: 'idx_footprintcategory_categorypath', columns: ['categoryPath'], options: ['lengths' => [191]])]
 #[Gedmo\Tree(type: Strategy::NESTED)]
 #[ApiResource(
 	operations: [

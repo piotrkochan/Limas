@@ -23,7 +23,25 @@ Ext.define('Limas.LowStockButton', {
 		this.callParent(arguments);
 
 		this.setHandler(Ext.bind(this.onClick, this));
-		this.refresh();
+
+		// The menu bar (and this button) is built at launch, BEFORE login, so
+		// refreshing now would fire the count request unauthenticated → 401.
+		// Refresh only once we're authenticated: immediately if credentials are
+		// already present, otherwise on the provider's `authenticate` event.
+		// NB: the base provider's getHeaders() returns {} (truthy!), so we test
+		// for the Authorization header itself, not just the object.
+		let provider = Limas.Auth.AuthenticationProvider.getAuthenticationProvider();
+		let headers = provider.getHeaders();
+		if (headers && headers.Authorization) {
+			this.refresh();
+		} else {
+			provider.on('authenticate', function (success) {
+				if (success) {
+					this.refresh();
+				}
+			}, this, {single: true});
+		}
+
 		// Fallback poll — 5 min is fine because the canonical refresh trigger
 		// is the partStockChanged hook fired by AddRemoveStock dialogs.
 		this.pollTask = Ext.TaskManager.start({
@@ -43,10 +61,20 @@ Ext.define('Limas.LowStockButton', {
 	 * collection response
 	 */
 	refresh: function () {
+		// Limas has no global Ext.Ajax auth interceptor — every request must
+		// attach the auth header itself (like HydraProxy and every other call
+		// site). Until authenticated getHeaders() carries no Authorization (the
+		// base provider even returns a truthy {}), so bail rather than fire an
+		// unauthenticated request that 401s.
+		let headers = Limas.Auth.AuthenticationProvider.getAuthenticationProvider().getHeaders();
+		if (!headers || !headers.Authorization) {
+			return;
+		}
 		let filter = Ext.encode([{property: 'lowStock', operator: '=', value: true}]);
 		Ext.Ajax.request({
 			url: Limas.getBasePath() + '/api/parts?itemsPerPage=1&filter=' + encodeURIComponent(filter),
 			method: 'GET',
+			headers: headers,
 			success: Ext.bind(function (response) {
 				let total = 0;
 				try {

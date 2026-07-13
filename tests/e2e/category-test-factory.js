@@ -254,13 +254,17 @@ function createCategoryTests(config) {
 			}, treeAlias);
 
 			await page.waitForFunction(() => Ext.Msg.isVisible(), {timeout: 3000});
-			await page.click('span.x-btn-inner:text("Yes")');
+			// Confirm via the Ext API — a DOM click on the button is unreliable
+			// when a floating window/toast overlays it (same fix as project/users)
+			await page.evaluate(() => Ext.Msg.down('#yes').fireHandler());
 			await page.waitForFunction(() => !Ext.Msg.isVisible(), {timeout: 5000});
 
 			// Wait for category to disappear
 			await page.waitForFunction((data) => {
 				const tree = Ext.ComponentQuery.query(data.alias)[0];
-				if (!tree) return false;
+				if (!tree) {
+					return false;
+				}
 				const store = tree.getStore();
 				return store.findNode('name', data.name) === null;
 			}, {alias: treeAlias, name: categoryName}, {timeout: 10000});

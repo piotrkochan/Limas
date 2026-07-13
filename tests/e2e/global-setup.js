@@ -32,6 +32,13 @@ module.exports = async () => {
 		// Create test storage location (required for part creation tests)
 		execSync('php bin/console dbal:run-sql "INSERT INTO StorageLocation (name, category_id) SELECT \'Test Location\', id FROM StorageLocationCategory LIMIT 1"', opts);
 
+		// Deterministic (unacknowledged) system notices for the notices UI
+		// tests. One is read-only (list/edit); the acknowledge test consumes
+		// one, so a small POOL of distinct ack-notices keeps it retry-safe
+		// (Playwright retries the whole test, and acknowledging is one-way).
+		// `date` is NOT NULL.
+		execSync('php bin/console dbal:run-sql "INSERT INTO SystemNotice (date, title, description, acknowledged, type) VALUES (NOW(), \'E2E Notice Read\', \'seeded for list/edit\', 0, \'e2e-test\'), (NOW(), \'E2E Notice Ack 1\', \'seeded for acknowledge\', 0, \'e2e-ack\'), (NOW(), \'E2E Notice Ack 2\', \'seeded for acknowledge\', 0, \'e2e-ack\'), (NOW(), \'E2E Notice Ack 3\', \'seeded for acknowledge\', 0, \'e2e-ack\')"', opts);
+
 		console.log('✅ Database ready\n');
 	} catch (error) {
 		console.error('❌ Database setup failed:', error.message);

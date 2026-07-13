@@ -12,6 +12,11 @@ use Symfony\Component\HttpFoundation\Response;
 class TemporaryFileControllerTest
 	extends WebTestCase
 {
+	// Inline 1x1 PNG keeps the URL-upload test offline & deterministic — no
+	// flaky external host; the backend decodes the data: URI through the same
+	// sink as a real download
+	private const string PNG_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAADElEQVQImWPgEpEDAABoAD0BFY5BAAAAAElFTkSuQmCC';
+
 	protected function setUp(): void
 	{
 		parent::setUp();
@@ -94,14 +99,41 @@ class TemporaryFileControllerTest
 		$client->request(
 			'POST',
 			'/api/temp_uploaded_files/upload',
-			['url' => 'https://httpbin.org/image/png']
+			['url' => self::PNG_DATA_URI]
 		);
 
-		$response = Json::decode(($resp=$client->getResponse())->getContent());
+		$response = Json::decode($client->getResponse()->getContent());
 
 		self::assertObjectHasProperty('success', $response);
 		self::assertObjectHasProperty('image', $response);
 		self::assertObjectHasProperty('response', $response);
+	}
+
+	/**
+	 * A stored HTML/script attachment must never be served inline: the
+	 * frontend loads getFile in a same-origin iframe, so an inline text/html
+	 * response would execute in another user's session. It must come back as
+	 * a download (attachment) with nosniff and a neutral content-type.
+	 */
+	public function testHtmlAttachmentIsServedAsDownloadNotInline(): void
+	{
+		$client = $this->makeAuthenticatedClient();
+
+		$client->request(
+			'POST',
+			'/api/temp_uploaded_files/upload',
+			['url' => 'data:text/html,<script>alert(document.cookie)</script>']
+		);
+		self::assertEquals(200, $client->getResponse()->getStatusCode());
+		$iri = Json::decode($client->getResponse()->getContent())->response->{'@id'};
+
+		$client->request('GET', $iri . '/getFile');
+		$response = $client->getResponse();
+
+		self::assertEquals(200, $response->getStatusCode());
+		self::assertEquals('nosniff', $response->headers->get('X-Content-Type-Options'));
+		self::assertSame('application/octet-stream', $response->headers->get('Content-Type'));
+		self::assertStringStartsWith('attachment', (string)$response->headers->get('Content-Disposition'));
 	}
 
 	public function testUploadException(): void

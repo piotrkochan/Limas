@@ -10,101 +10,100 @@ class OperatingSystem
 	/**
 	 * Returns the platform name the system is running on
 	 *
-	 * Typical return values are: "Linux", "FreeBSD", "Darwin" (Mac OSX), "Windows"
+	 * Typical return values are: "Linux", "FreeBSD", "Darwin" (Mac OSX),
+	 * "Windows NT". Uses php_uname() so it works everywhere without the
+	 * posix extension.
 	 */
 	public function getPlatform(): string
 	{
-		if (function_exists('posix_uname')) {
-			$data = posix_uname();
-			if (array_key_exists('sysname', $data)) {
-				return $data['sysname'];
-			}
-		}
+		$sysname = php_uname('s');
+		return $sysname !== '' ? $sysname : 'unknown';
+	}
 
-		return match (\PHP_OS) {
-			'Linux' => 'Linux',
-			'WINNT' => 'Windows',
-			default => 'unknown',
+	/**
+	 * Returns the OS release / distribution
+	 */
+	public function getRelease(): string
+	{
+		return match (\PHP_OS_FAMILY) {
+			'Darwin' => $this->getMacVersion(),
+			'Linux' => $this->getLinuxDistribution(),
+			// Windows / BSD / Solaris / unknown: php_uname('r') is the
+			// kernel/OS release string (e.g. "10.0", "13.2-RELEASE", "5.11")
+			default => $this->unameRelease(),
 		};
 	}
 
 	/**
-	 * Returns the distribution
+	 * Kernel/OS release string, with a safe fallback for the (unlikely)
+	 * empty result
 	 */
-	public function getRelease(): string
+	private function unameRelease(): string
 	{
-		switch (strtolower($this->getPlatform())) {
-			case 'freebsd':
-				/*
-				 * Unfortunately, there's no text file on FreeBSD which tells us the release number. Thus, we hope that
-				 * "release" within posix_uname() is defined.
-				 */
-				if (function_exists('posix_uname')) {
-					$data = posix_uname();
-					if (array_key_exists('release', $data)) {
-						return $data['release'];
-					}
-				}
-				break;
-			case 'darwin':
-				// Mac stores its version number in a public readable plist file, which is in XML format
-				$document = new \DOMDocument;
-				$document->load('/System/Library/CoreServices/SystemVersion.plist');
-				$xpath = new \DOMXPath($document);
-				$entries = $xpath->query('/plist/dict/*');
+		$release = php_uname('r');
+		return $release !== '' ? $release : 'unknown';
+	}
 
-				$previous = '';
-				foreach ($entries as $entry) {
-					if (str_contains($previous, 'ProductVersion')) {
-						return $entry->textContent;
-					}
-					$previous = $entry->textContent;
-				}
-				break;
-			case 'linux':
-				return $this->getLinuxDistribution();
-			default:
-				break;
+	/**
+	 * Mac stores its version number in a public readable plist file (XML)
+	 */
+	private function getMacVersion(): string
+	{
+		$plist = '/System/Library/CoreServices/SystemVersion.plist';
+		if (!is_readable($plist)) {
+			return $this->unameRelease();
+		}
+
+		$document = new \DOMDocument;
+		if (@$document->load($plist) === false) {
+			return $this->unameRelease();
+		}
+		$xpath = new \DOMXPath($document);
+		$entries = $xpath->query('/plist/dict/*');
+
+		$previous = '';
+		foreach ($entries === false ? [] : $entries as $entry) {
+			if (str_contains($previous, 'ProductVersion')) {
+				return $entry->textContent;
+			}
+			$previous = $entry->textContent;
 		}
 
 		return 'unknown';
 	}
 
 	/**
-	 * Tries to detect the distribution
-	 *
-	 * As I don't have any other distributions at hand to test with, I rely on user feedback which distributions don't have lsb_release.
+	 * Detects the Linux distribution from the freedesktop os-release file
+	 * (PRETTY_NAME, falling back to NAME). This is the systemd-era standard
+	 * present on essentially every current distro — no external process, so
+	 * no `lsb_release` shell-out (which triggered a static-analysis flag and
+	 * leaked a "command not found" line to stderr when the tool was absent).
 	 */
 	public function getLinuxDistribution(): string
 	{
-		// Try executing lsb_release
-		/* @phpstan-ignore-next-line */
-		$release = @exec('lsb_release -d -s', $void, $retval);
-
-		if ($retval === 0 && $release !== '') {
-			return trim(str_replace(['"', "'"], '', $release));
-		}
-
 		$name = '';
-		foreach (glob('/etc/*-release') as $file) {
+		$globbed = glob('/etc/*-release');
+		$candidates = array_merge($globbed === false ? [] : $globbed, ['/usr/lib/os-release']);
+		foreach ($candidates as $file) {
+			if (!is_readable($file)) {
+				continue;
+			}
 			foreach (FileSystem::readLines($file) as $line) {
 				$kv = explode('=', $line);
 				if (count($kv) !== 2) {
 					continue;
 				}
-				if (trim($kv[0]) === 'PRETTY_NAME') {
-					return trim(str_replace(['"', "'"], '', $kv[1]));
+				$key = trim($kv[0]);
+				$value = trim(str_replace(['"', "'"], '', $kv[1]));
+				if ($key === 'PRETTY_NAME' && $value !== '') {
+					return $value;
 				}
-				if ($name === '' && trim($kv[0]) === 'NAME') {
-					$name = trim($kv[1]);
+				if ($name === '' && $key === 'NAME') {
+					$name = $value;
 				}
 			}
 		}
-		if ($name !== '') {
-			return $name;
-		}
 
-		//@todo we need better handling here
-		return 'unknown';
+		return $name !== '' ? $name : 'unknown';
 	}
 }

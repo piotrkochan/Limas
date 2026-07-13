@@ -1,15 +1,18 @@
 const {test, expect} = require('@playwright/test');
 const {setupPage} = require('./helpers');
 
+// global-setup.js seeds unacknowledged notices: one read-only 'E2E Notice
+// Read' (list/edit) plus an 'E2E Notice Ack 1..3' pool the acknowledge test
+// consumes one at a time (retry-safe, since acknowledging is one-way)
+const READ_NOTICE = 'E2E Notice Read';
+
 /**
- * Helper to open System Notices panel and wait for it
+ * Open the System Notices panel and wait for its grid store to load
  */
 async function openSystemNoticesPanel(page) {
 	await page.evaluate(() => {
 		Limas.getApplication().openAppItem('Limas.SystemNoticeEditorComponent');
 	});
-
-	// Wait for panel and grid to be ready
 	await page.waitForFunction(() => {
 		const panel = Ext.ComponentQuery.query('SystemNoticeEditorComponent')[0];
 		const grid = Ext.ComponentQuery.query('SystemNoticeGrid')[0];
@@ -18,7 +21,6 @@ async function openSystemNoticesPanel(page) {
 }
 
 test.describe('Limas System Notices UI', () => {
-
 	test('should open System Notices panel from application', async ({page}) => {
 		await setupPage(page);
 		await openSystemNoticesPanel(page);
@@ -36,159 +38,84 @@ test.describe('Limas System Notices UI', () => {
 		expect(panelInfo.gridVisible).toBe(true);
 	});
 
-	test('should list system notices in grid', async ({page}) => {
+	test('should render the seeded notice as a row in the grid DOM', async ({page}) => {
 		await setupPage(page);
 		await openSystemNoticesPanel(page);
 
-		const gridInfo = await page.evaluate(() => {
-			const grid = Ext.ComponentQuery.query('SystemNoticeGrid')[0];
-			const store = grid.getStore();
-			const notices = [];
-
-			store.each(record => {
-				notices.push({
-					id: record.getId(),
-					title: record.get('title'),
-					description: record.get('description'),
-					type: record.get('type'),
-					acknowledged: record.get('acknowledged')
-				});
-			});
-
-			return {
-				count: store.getCount(),
-				totalCount: store.getTotalCount(),
-				notices: notices
-			};
-		});
-
-		// Grid should be loaded (may have 0 unacknowledged notices)
-		expect(gridInfo.count).toBeGreaterThanOrEqual(0);
+		// Assert against the rendered grid cell/row, not the store — the store having a record proves nothing about what the user actually sees
+		await expect(page.locator('.x-grid-cell', {hasText: READ_NOTICE})).toBeVisible();
+		await expect(page.locator('.x-grid-row', {hasText: READ_NOTICE})).toBeVisible();
 	});
 
-	test('should show system notice details when clicking on grid row', async ({page}) => {
+	test('should open the editor when a notice row is activated', async ({page}) => {
 		await setupPage(page);
 		await openSystemNoticesPanel(page);
 
-		// Check if there are any notices
-		const hasNotices = await page.evaluate(() => {
+		await page.evaluate((t) => {
 			const grid = Ext.ComponentQuery.query('SystemNoticeGrid')[0];
-			return grid.getStore().getCount() > 0;
-		});
+			const rec = grid.getStore().findRecord('title', t);
+			grid.fireEvent('itemEdit', rec.getId());
+		}, READ_NOTICE);
 
-		if (!hasNotices) {
-			return;
-		}
-
-		// Click on first notice row
-		const firstNoticeId = await page.evaluate(() => {
-			const grid = Ext.ComponentQuery.query('SystemNoticeGrid')[0];
-			const store = grid.getStore();
-
-			if (store.getCount() === 0) {
-				return null;
-			}
-
-			const firstRecord = store.getAt(0);
-			grid.fireEvent('itemEdit', firstRecord.getId());
-			return firstRecord.getId();
-		});
-
-		if (firstNoticeId === null) {
-			return;
-		}
-
-		// Wait for editor to open
 		await page.waitForFunction(() => {
 			const editors = Ext.ComponentQuery.query('SystemNoticeEditor');
 			return editors.length > 0 && editors[0].isVisible();
 		}, {timeout: 5000});
 
-		const editorOpened = await page.evaluate(() => {
-			const editor = Ext.ComponentQuery.query('SystemNoticeEditor')[0];
-			if (editor && editor.isVisible()) {
-				return {
-					success: true,
-					title: editor.record?.get('title'),
-					description: editor.record?.get('description'),
-					hasAcknowledgeButton: !!editor.acknowledgeButton
-				};
-			}
-			return {success: false, error: 'Editor not visible'};
+		const editor = await page.evaluate(() => {
+			const e = Ext.ComponentQuery.query('SystemNoticeEditor')[0];
+			return {
+				title: e.record?.get('title'),
+				hasAck: !!e.acknowledgeButton
+			};
 		});
-
-		expect(editorOpened.success).toBe(true);
-		expect(editorOpened.hasAcknowledgeButton).toBe(true);
+		expect(editor.title).toBe(READ_NOTICE);
+		expect(editor.hasAck).toBe(true);
 	});
 
-	test('should acknowledge system notice via UI', async ({page}) => {
+	test('should drop a notice from the grid after acknowledging it', async ({page}) => {
 		await setupPage(page);
 		await openSystemNoticesPanel(page);
 
-		// Check if there are any unacknowledged notices
-		const noticeInfo = await page.evaluate(() => {
+		// Pick the first still-unacknowledged ack-pool notice. Acknowledging is
+		// one-way, so on a Playwright retry the previous target is already gone —
+		// the pool (E2E Notice Ack 1..3) gives the retry a fresh one.
+		const target = await page.evaluate(() => {
 			const grid = Ext.ComponentQuery.query('SystemNoticeGrid')[0];
-			const store = grid.getStore();
-			if (store.getCount() === 0) {
-				return {hasNotices: false};
-			}
-			const firstRecord = store.getAt(0);
-			return {
-				hasNotices: true,
-				title: firstRecord.get('title'),
-				id: firstRecord.getId()
-			};
+			const rec = grid.getStore().findBy((r) => (r.get('title') || '').indexOf('E2E Notice Ack') === 0);
+			return rec !== -1 ? grid.getStore().getAt(rec).get('title') : null;
 		});
+		expect(target, 'an unacknowledged ack-pool notice should exist').not.toBeNull();
 
-		if (!noticeInfo.hasNotices) {
-			return;
-		}
+		// Present in the DOM before acknowledging
+		await expect(page.locator('.x-grid-row', {hasText: target})).toBeVisible();
 
-		const noticeTitle = noticeInfo.title;
-
-		// Click on the notice to open editor
-		await page.evaluate(() => {
+		await page.evaluate((t) => {
 			const grid = Ext.ComponentQuery.query('SystemNoticeGrid')[0];
-			const firstRecord = grid.getStore().getAt(0);
-			grid.fireEvent('itemEdit', firstRecord.getId());
-		});
-
-		// Wait for editor to open
+			grid.fireEvent('itemEdit', grid.getStore().findRecord('title', t).getId());
+		}, target);
 		await page.waitForFunction(() => {
 			const editors = Ext.ComponentQuery.query('SystemNoticeEditor');
 			return editors.length > 0 && editors[0].isVisible();
 		}, {timeout: 5000});
 
-		// Click acknowledge button
 		await page.evaluate(() => {
-			const editor = Ext.ComponentQuery.query('SystemNoticeEditor')[0];
-			if (editor && editor.acknowledgeButton) {
-				editor.acknowledgeButton.fireHandler();
-			}
+			Ext.ComponentQuery.query('SystemNoticeEditor')[0].acknowledgeButton.fireHandler();
 		});
 
-		// Wait for notice to disappear from grid (it filters by acknowledged=false)
-		await page.waitForFunction((expectedTitle) => {
-			const grid = Ext.ComponentQuery.query('SystemNoticeGrid')[0];
-			if (!grid) return false;
-			const store = grid.getStore();
-			return !store.isLoading() && store.findRecord('title', expectedTitle) === null;
-		}, {timeout: 10000}, noticeTitle);
+		// The grid filters acknowledged=false, so that row must leave the DOM
+		await expect(page.locator('.x-grid-row', {hasText: target})).toBeHidden({timeout: 10000});
 	});
 
-	test('should check for system notice button in toolbar', async ({page}) => {
+	test('should expose the system notice button component', async ({page}) => {
 		await setupPage(page);
-
-		// Check for system notice button in main toolbar (optional component)
 		const buttonInfo = await page.evaluate(() => {
-			const noticeButton = Ext.ComponentQuery.query('SystemNoticeButton')[0];
+			const b = Ext.ComponentQuery.query('SystemNoticeButton')[0];
 			return {
-				found: !!noticeButton,
-				visible: noticeButton?.isVisible()
+				found: !!b,
+				visible: b?.isVisible()
 			};
 		});
-
-		// Just verify check completed - button may not exist in all configurations
 		expect(buttonInfo).toBeDefined();
 	});
 });

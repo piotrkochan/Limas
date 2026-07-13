@@ -263,6 +263,37 @@ class AdvancedSearchFilterTest
 		self::assertCount(2, $data['hydra:member']);
 	}
 
+	/**
+	 * A filter path that isn't a real field/association on the entity, or is
+	 * nested too deeply, must be rejected with a clean 400 — not leak a DQL
+	 * parse error (existence oracle) or force a huge JOIN chain
+	 */
+	public function testUnknownOrTooDeepPropertyReturnsBadRequest(): void
+	{
+		$client = $this->makeAuthenticatedClient();
+
+		$cases = [
+			[['property' => 'totallyBogusColumn', 'operator' => '=', 'value' => 'x']],
+			[['property' => 'bogusRelation.name', 'operator' => '=', 'value' => 'x']],
+			[['property' => 'a.b.c.d.e.name', 'operator' => '=', 'value' => 'x']]
+		];
+
+		foreach ($cases as $filter) {
+			$client->request(
+				'GET',
+				'/api/parts?filter=' . Json::encode($filter),
+				[],
+				[],
+				['CONTENT_TYPE' => 'application/json']
+			);
+			self::assertEquals(
+				400,
+				$client->getResponse()->getStatusCode(),
+				Json::encode($filter)
+			);
+		}
+	}
+
 //	protected function tearDown(): void
 //	{
 //		parent::tearDown();

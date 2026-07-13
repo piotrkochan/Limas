@@ -18,11 +18,13 @@ use Gedmo\Tree\Strategy;
 use Limas\Controller\Actions\CategoryActions;
 use Limas\Controller\Actions\PartCategoryActions;
 use Limas\Entity\Traits\Tree;
+use Limas\State\PartCategoryDeleteProcessor;
 use Symfony\Component\Serializer\Attribute\Groups;
 
 
 #[ORM\Entity(repositoryClass: NestedTreeRepository::class)]
 #[ORM\Index(fields: ['lft']), ORM\Index(fields: ['rgt'])]
+#[ORM\Index(name: 'idx_partcategory_categorypath', columns: ['categoryPath'], options: ['lengths' => [191]])]
 #[Gedmo\Tree(type: Strategy::NESTED)]
 #[ApiResource(
 	operations: [
@@ -36,7 +38,7 @@ use Symfony\Component\Serializer\Attribute\Groups;
 		new Get,
 //		new Put,
 		new Patch,
-		new Delete,
+		new Delete(processor: PartCategoryDeleteProcessor::class),
 		new Put(
 			uriTemplate: 'part_categories/{id}/move',
 			controller: CategoryActions::class . '::MoveAction',

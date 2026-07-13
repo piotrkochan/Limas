@@ -30,6 +30,15 @@ interface InfoProviderInterface
 	public function getName(): string;
 
 	/**
+	 * Legal attribution / source-credit line the distributor's API terms require
+	 * to be shown wherever their data is displayed (TME §8.7, DigiKey §3.1.4,
+	 * element14/Farnell §5). null when the source imposes no such obligation
+	 * (LCSC public endpoints, OEMSecrets). The frontend renders it under each
+	 * source's data in the aggregator.
+	 */
+	public function getAttribution(): ?string;
+
+	/**
 	 * True when the underlying service has all credentials it needs to run.
 	 * Aggregator uses this to filter out providers with missing keys.
 	 */

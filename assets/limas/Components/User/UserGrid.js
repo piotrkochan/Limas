@@ -63,5 +63,21 @@ Ext.define('Limas.UserGrid', {
 	onProviderSelect: function (combo, record) {
 		this.filter.setValue(record);
 		this.store.addFilter(this.filter);
+	},
+	/**
+	 * Mirrors UserEditor's save-button disable for the protected flag:
+	 * once the selection contains a protected user the Delete button
+	 * refuses to enable so the user doesn't hit an FK / policy error
+	 * mid-way through a bulk delete
+	 */
+	_updateDeleteButton: function () {
+		this.callParent(arguments);
+		let selection = this.getSelectionModel().getSelection();
+		for (let i = 0; i < selection.length; i++) {
+			if (selection[i].get('protected') === true) {
+				this.deleteButton.disable();
+				return;
+			}
+		}
 	}
 });

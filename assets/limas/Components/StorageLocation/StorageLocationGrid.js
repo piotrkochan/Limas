@@ -32,6 +32,39 @@ Ext.define('Limas.StorageLocationGrid', {
 			this.topToolbar.insert(2, {xtype: 'tbseparator'});
 			this.topToolbar.insert(3, this.multiCreateButton);
 		}
+
+		this.printLabelsButton = Ext.create('Ext.button.Button', {
+			iconCls: 'fugue-icon printer',
+			tooltip: i18n('Print labels for selected storage locations'),
+			disabled: true,
+			handler: Ext.bind(this.onPrintLabelsClick, this)
+		});
+		this.topToolbar.add({xtype: 'tbseparator'});
+		this.topToolbar.add(this.printLabelsButton);
+
+		this.on('selectionchange', this.onLabelsSelectionChange, this);
+	},
+	onLabelsSelectionChange: function (sm, selections) {
+		if (this.printLabelsButton) {
+			this.printLabelsButton.setDisabled(!selections || selections.length === 0);
+		}
+	},
+	onPrintLabelsClick: function () {
+		let ids = this.getSelection()
+			.map(function (rec) {
+				return rec.get('@id') || '';
+			})
+			.map(function (iri) {
+				let m = iri.match(/\/(\d+)$/);
+				return m ? parseInt(m[1], 10) : null;
+			})
+			.filter(function (id) {
+				return id !== null;
+			});
+		if (ids.length === 0) {
+			return;
+		}
+		Limas.printLabelSheet({storageLocations: ids});
 	},
 	/**
 	 * Creates a new storage location multi-create window

@@ -430,6 +430,8 @@ if (!Encore.isDev()) {
 				'@/limas/Components/SystemPreferences/Preferences/RequiredPartManufacturerFields.js',
 				'@/limas/Components/SystemPreferences/Preferences/RequiredPartDistributorFields.js',
 				'@/limas/Components/SystemPreferences/Preferences/BarcodeScannerConfiguration.js',
+				'@/limas/Components/SystemPreferences/Preferences/LabelConfiguration.js',
+				'@/limas/Components/SystemPreferences/Preferences/DuplicatePartDetection.js',
 				'@/limas/Components/SystemPreferences/Preferences/ActionsConfiguration.js',
 				'@/limas/Components/UserPreferences/Preferences/TipOfTheDayConfiguration.js',
 				'@/limas/Components/UserPreferences/Preferences/FormattingConfiguration.js',

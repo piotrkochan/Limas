@@ -53,6 +53,14 @@ final class FarnellAdapter
 		return $this->name;
 	}
 
+	public function getAttribution(): string
+	{
+		// element14/Farnell API Terms §5 — "clearly and conspicuously attribute
+		// the source". One adapter serves the whole Premier Farnell family
+		// (Farnell / Newark / element14), so credit the family.
+		return 'Data provided by Farnell / Newark / element14 (Premier Farnell)';
+	}
+
 	/** @return string[] */
 	public function getHandledDomains(): array
 	{

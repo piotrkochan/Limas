@@ -26,7 +26,13 @@ Fresh install
 2. Configure your webserver to serve from the `public/` folder. See [here](https://symfony.com/doc/6.1/setup/web_server_configuration.html) for additional information.
 3. Copy the global config file `cp .env .env.local` and edit `.env.local`:
    * Change the line `APP_ENV=dev` to `APP_ENV=prod`
-4. Install composer dependencies and generate autoload files: `SYMFONY_ENV=prod composer install --no-dev -o`
+   * Set a strong, random `APP_SECRET` and a non-default `JWT_PASSPHRASE`. In
+     production the kernel **refuses to boot** with an empty/too-short
+     `APP_SECRET` or with `JWT_PASSPHRASE` empty or left at the shipped
+     `passphrase` default. Generate each with e.g. `openssl rand -hex 32`.
+     Set `JWT_PASSPHRASE` **before** generating the JWT keypair (step 11) — the
+     private key is encrypted with it, so changing it afterwards invalidates the keys.
+4. Install composer dependencies and generate autoload files: `APP_ENV=prod composer install --no-dev -o`
 5. Install client side dependencies and build it: `yarn install` and `yarn build`
 6. Create database: `php bin/console doctrine:migrations:migrate`
 7. Init database: `php bin/console doctrine:fixtures:load --group=setup --append`

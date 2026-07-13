@@ -56,6 +56,14 @@ final class LcscAdapter
 		return 'lcsc';
 	}
 
+	public function getAttribution(): ?string
+	{
+		// Uses the community jlcsearch + public wmsc.lcsc.com endpoints, which
+		// carry no attribution obligation (the restrictive clauses belong to
+		// LCSC's official key-gated API, which Limas does not use)
+		return null;
+	}
+
 	public function isConfigured(): bool
 	{
 		return $this->service->isConfigured();

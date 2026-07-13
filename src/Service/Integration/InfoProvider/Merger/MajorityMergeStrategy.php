@@ -61,25 +61,35 @@ final readonly class MajorityMergeStrategy
 			return new FieldWithProvenance($base->chosenValue, $base->sourcesValues, true, FieldWithProvenance::RESOLUTION_HIERARCHY);
 		}
 
-		// 3+ sources, conflict — vote
-		$votes = array_count_values(array_values($nonEmpty));
+		// 3+ sources, conflict — vote on *normalised* keys so case/whitespace
+		// variants of one value count together (mirrors the conflict detection
+		// above). Otherwise "1N4148"/"1n4148"/"1N4148W" tally 1-1-1 (fake tie)
+		// and the hierarchy tie-break overrides the real 2-of-3 majority.
+		// Keep a representative original-cased value per key to return.
+		$votes = [];
+		$representative = [];
+		foreach (array_values($nonEmpty) as $value) {
+			$key = self::softNormalize($value);
+			$votes[$key] = ($votes[$key] ?? 0) + 1;
+			$representative[$key] ??= $value;
+		}
 		arsort($votes);
 		$top = max($votes);
 		$winners = array_keys(array_filter($votes, static fn(int $c): bool => $c === $top));
 
 		if (count($winners) === 1) {
-			return new FieldWithProvenance($winners[0], $values, true, FieldWithProvenance::RESOLUTION_MAJORITY);
+			return new FieldWithProvenance($representative[$winners[0]], $values, true, FieldWithProvenance::RESOLUTION_MAJORITY);
 		}
 
-		// Tie among winners — break with hierarchy among only the tied values
-		$onlyTiedValues = array_filter($nonEmpty, static fn(?string $v): bool => in_array($v, $winners, true));
+		// Tie among normalised winners — break with hierarchy among only the sources whose (normalised) value is one of the tied winners
+		$tiedBySource = array_filter($nonEmpty, static fn(?string $v): bool => in_array(self::softNormalize((string)$v), $winners, true));
 		foreach ($this->priority as $src) {
-			if (array_key_exists($src, $onlyTiedValues)) {
-				return new FieldWithProvenance($onlyTiedValues[$src], $values, true, FieldWithProvenance::RESOLUTION_HIERARCHY);
+			if (array_key_exists($src, $tiedBySource)) {
+				return new FieldWithProvenance($tiedBySource[$src], $values, true, FieldWithProvenance::RESOLUTION_HIERARCHY);
 			}
 		}
-		// No priority source among tied winners — first tied value wins
-		return new FieldWithProvenance($winners[0], $values, true, FieldWithProvenance::RESOLUTION_HIERARCHY);
+		// No priority source among tied winners — first tied representative wins
+		return new FieldWithProvenance($representative[$winners[0]], $values, true, FieldWithProvenance::RESOLUTION_HIERARCHY);
 	}
 
 	/**

@@ -208,7 +208,7 @@ Ext.define('Limas.Importer.Importer', {
 	executeImport: function () {
 		//@todo Implement warning dialog
 		Ext.Ajax.request({
-			url: Limas.getBasePath() + '/executeImport/?file=' + this.temporaryFile,
+			url: Limas.getBasePath() + '/api/import/executeImport?file=' + this.temporaryFile,
 			method: 'POST',
 			params: {
 				configuration: Ext.encode(this.importConfiguration),
@@ -261,7 +261,7 @@ Ext.define('Limas.Importer.Importer', {
 		this.validateConfig();
 
 		Ext.Ajax.request({
-			url: Limas.getBasePath() + '/getPreview/?file=' + this.temporaryFile,
+			url: Limas.getBasePath() + '/api/import/getPreview?file=' + this.temporaryFile,
 			method: 'POST',
 			params: {
 				configuration: Ext.encode(this.importConfiguration),
@@ -358,12 +358,10 @@ Ext.define('Limas.Importer.Importer', {
 
 				// field.compileValidators();
 
-				if (typeof field.instanceValidators!=='undefined') {
-				// for (let i = 0; i < field._validators.length; i++) {
-				for (let i = 0; i < field.instanceValidators.length; i++) {
-					// fieldData.required = field._validators[i].type === 'presence';
-					fieldData.required = field.instanceValidators[i].type === 'presence';
-				}
+				if (typeof field.instanceValidators !== 'undefined') {
+					for (let i = 0; i < field.instanceValidators.length; i++) {
+						fieldData.required = field.instanceValidators[i].type === 'presence';
+					}
 				}
 
 				return fieldData;
@@ -373,7 +371,7 @@ Ext.define('Limas.Importer.Importer', {
 		this.temporaryFile = temporaryFile;
 
 		Ext.Ajax.request({
-			url: Limas.getBasePath() + '/getSource/?file=' + temporaryFile,
+			url: Limas.getBasePath() + '/api/import/getSource?file=' + temporaryFile,
 			success: function (response) {
 				this.reconfigureGrid(Ext.decode(response.responseText));
 			},

@@ -79,6 +79,7 @@ Ext.define('Limas.Components.InfoProviderAggregator.SearchPanel', {
 				{name: 'worstLifecycle', type: 'string'},
 				{name: 'providerSpecific'},
 				{name: 'paramsFlat'}, // flat de-duped param list for applyData
+				{name: 'paramsBySource'}, // {canonicalKey: {name, sources: {src: {value, numeric…}}}} — per-parameter Review override
 				{name: 'conflictsDetail'}, // {fieldName: {chosen, sources: {sourceName: value}}}
 				// Existing-part info: flat scalar fields driven by the
 				// unambiguous `inDb` boolean. ExtJS's int/string coercion was
@@ -708,36 +709,67 @@ Ext.define('Limas.Components.InfoProviderAggregator.SearchPanel', {
 		// parses each value into numeric + unit + siPrefix + qualifier.
 		// Per canonical we collapse to ONE row: qualifier=max writes
 		// maxValue, qualifier=min writes minValue, untagged → value.
-		let collected = {}, paramsFlat = [];
+		let collected = {}, paramsFlat = [], bySource = {};
+		// Fold one parsed Parameter into a target entry: qualifier=max writes
+		// maxValue, qualifier=min writes minValue, untagged → value. Shared
+		// between the cross-source collapse (paramsFlat) and the per-source copy
+		// (paramsBySource) so both stay in lock-step.
+		let mergeParam = function (t, p) {
+			if (t.numericMin === null && p.numericMin !== null) t.numericMin = p.numericMin;
+			if (t.numericMax === null && p.numericMax !== null) t.numericMax = p.numericMax;
+			if (p.qualifier === 'max') {
+				if (t.numericMax === null && p.numericValue !== null) {
+					t.numericMax = p.numericValue;
+				}
+			} else if (p.qualifier === 'min') {
+				if (t.numericMin === null && p.numericValue !== null) {
+					t.numericMin = p.numericValue;
+				}
+			} else if (t.numericValue === null && p.numericValue !== null && t.numericMin === null && t.numericMax === null) {
+				t.numericValue = p.numericValue;
+			}
+			if (!t.unit && p.unit) {
+				t.unit = p.unit;
+			}
+			if (!t.siPrefix && p.siPrefix) {
+				t.siPrefix = p.siPrefix;
+			}
+			if (!t.valueText && p.valueText) {
+				t.valueText = p.valueText;
+			}
+		};
+		let freshEntry = function (p) {
+			return {
+				value: p.rawValue,
+				numericValue: null, numericMin: null, numericMax: null,
+				unit: null, siPrefix: null, valueText: null
+			};
+		};
 		Ext.Object.each(c.parameters || {}, function (src, list) {
 			Ext.Array.each(list || [], function (p) {
 				let key = (p.canonicalName || p.rawName || '').toLowerCase();
 				if (!key || !p.rawValue) return;
 				let entry = collected[key];
 				if (!entry) {
-					entry = {
-						name: p.canonicalName || p.rawName,
-						value: p.rawValue,
-						numericValue: null, numericMin: null, numericMax: null,
-						unit: null, siPrefix: null, valueText: null
-					};
+					entry = Ext.apply({name: p.canonicalName || p.rawName}, freshEntry(p));
 					collected[key] = entry;
 					paramsFlat.push(entry);
 				}
-				if (entry.numericMin === null && p.numericMin !== null) entry.numericMin = p.numericMin;
-				if (entry.numericMax === null && p.numericMax !== null) entry.numericMax = p.numericMax;
-				if (p.qualifier === 'max') {
-					if (entry.numericMax === null && p.numericValue !== null) entry.numericMax = p.numericValue;
-				} else if (p.qualifier === 'min') {
-					if (entry.numericMin === null && p.numericValue !== null) entry.numericMin = p.numericValue;
-				} else if (entry.numericValue === null && p.numericValue !== null
-					&& entry.numericMin === null && entry.numericMax === null
-				) {
-					entry.numericValue = p.numericValue;
+				mergeParam(entry, p);
+
+				// Per-source copy so the Review dialog can offer a per-parameter
+				// override where distributors disagree (conflicts-only in the UI)
+				let bs = bySource[key];
+				if (!bs) {
+					bs = {name: entry.name, sources: {}};
+					bySource[key] = bs;
 				}
-				if (!entry.unit && p.unit) entry.unit = p.unit;
-				if (!entry.siPrefix && p.siPrefix) entry.siPrefix = p.siPrefix;
-				if (!entry.valueText && p.valueText) entry.valueText = p.valueText;
+				let se = bs.sources[src];
+				if (!se) {
+					se = freshEntry(p);
+					bs.sources[src] = se;
+				}
+				mergeParam(se, p);
 			});
 		});
 		let mpn = c.manufacturerPartNumber ? c.manufacturerPartNumber.chosenValue : '';
@@ -785,6 +817,7 @@ Ext.define('Limas.Components.InfoProviderAggregator.SearchPanel', {
 			worstLifecycle: worstLifecycle,
 			providerSpecific: c.providerSpecific || {},
 			paramsFlat: paramsFlat,
+			paramsBySource: bySource,
 			conflictsDetail: conflictsDetail,
 			inDb: !!c.existingPart,
 			existingPartId: c.existingPart ? c.existingPart.partId : 0,
@@ -1165,6 +1198,14 @@ Ext.define('Limas.Components.InfoProviderAggregator.SearchPanel', {
 		let providerSpecific = row.get('providerSpecific') || {};
 		let datasheetSources = row.get('datasheetSources') || {};
 		let imageSources = row.get('imageSources') || {};
+		// Per-source legal attribution string (from /sources) — some distributor
+		// API terms require crediting them wherever their data is shown.
+		let attrBySource = {};
+		(this.configuredSourceData || []).forEach(function (s) {
+			if (s && s.attribution) {
+				attrBySource[s.name] = s.attribution;
+			}
+		});
 		let html = this.renderConflictsSection(row);
 		let fmtPrice = (p, currency) => {
 			if (p === null || p === undefined) return '—';
@@ -1210,10 +1251,14 @@ Ext.define('Limas.Components.InfoProviderAggregator.SearchPanel', {
 					'<th style="text-align:right;padding:2px 6px;">' + i18n('Price') + '</th></tr></thead>' +
 					'<tbody>' + rows + '</tbody></table>';
 			}
+			let attribution = attrBySource[source]
+				? '<div class="limas-text-muted" style="margin-top:6px;font-size:10px;font-style:italic;">' + Ext.htmlEncode(attrBySource[source]) + '</div>'
+				: '';
 			html += '<div class="limas-border-subtle limas-bg-subtle" style="margin-bottom:10px;padding:6px 8px;border-radius:4px;">' +
 				'<div style="overflow:hidden;margin-bottom:4px;">' + header + openLink + '</div>' +
 				lines.join('') +
 				priceTable +
+				attribution +
 				'</div>';
 		});
 		return html || '<i class="limas-text-muted">' + i18n('No per-distributor info on this candidate.') + '</i>';
@@ -1303,7 +1348,7 @@ Ext.define('Limas.Components.InfoProviderAggregator.SearchPanel', {
 		// to have already wired the default; aggregator-opened editors
 		// often haven't.
 		if (!part.getPartUnit()) {
-			let defaultUnit = Limas.getDefaultPartUnit();
+			let defaultUnit = Limas.getApplication().getDefaultPartUnit();
 			if (defaultUnit) {
 				part.setPartUnit(defaultUnit);
 			}
@@ -1320,7 +1365,18 @@ Ext.define('Limas.Components.InfoProviderAggregator.SearchPanel', {
 			this.applyDistributors(part, row.get('providerSpecific') || {});
 		}
 		if (this.applyFlags.parameters) {
-			this.applyParameters(part, row.get('paramsFlat') || []);
+			// Swap in any per-parameter override the Review dialog collected.
+			// overrides.parameters is keyed by the canonical (lowercased) name
+			// and carries the chosen source's fully-parsed entry, so numeric /
+			// unit / siPrefix come along, not just the display string.
+			let params = row.get('paramsFlat') || [];
+			if (overrides.parameters) {
+				params = params.map(function (e) {
+					let ov = overrides.parameters[(e.name || '').toLowerCase()];
+					return ov || e;
+				});
+			}
+			this.applyParameters(part, params);
 		}
 
 		this.applyAttachments(part, row, this.applyFlags, overrides, () => {

@@ -10,6 +10,7 @@ use Doctrine\Migrations\Configuration\EntityManager\ExistingEntityManager;
 use Doctrine\Migrations\Configuration\Migration\ExistingConfiguration;
 use Doctrine\Migrations\DependencyFactory;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\Mapping\ManyToManyOwningSideMapping;
 use League\Flysystem\FilesystemOperator;
 use Limas\DataFixtures\ParameterAliasFixtures;
 use Limas\Entity\BatchJob;
@@ -56,9 +57,9 @@ use Limas\Entity\Unit;
 use Limas\Entity\User;
 use Limas\Entity\UserPreference;
 use Limas\Entity\UserProvider;
+use Limas\Service\Integration\InfoProvider\Dto\Parameter as InfoProviderParameter;
 use Limas\Service\Integration\InfoProvider\ParameterNormalizer;
 use Limas\Service\Integration\InfoProvider\ParameterValueParser;
-use Limas\Service\Integration\InfoProvider\Dto\Parameter as InfoProviderParameter;
 use Limas\Service\ManufacturerCanonicalizer;
 use Limas\Service\UserService;
 use Nette\Utils\FileSystem as NFileSystem;
@@ -85,12 +86,12 @@ class ImportPartKeeprCommand
 
 
 	public function __construct(
-		private readonly EntityManagerInterface  $entityManager,
-		private readonly FilesystemOperator      $blobStorage,
-		private readonly UserService             $userService,
+		private readonly EntityManagerInterface    $entityManager,
+		private readonly FilesystemOperator        $blobStorage,
+		private readonly UserService               $userService,
 		private readonly ManufacturerCanonicalizer $manufacturerCanonicalizer,
-		private readonly ParameterNormalizer     $parameterNormalizer,
-		private readonly ParameterValueParser    $parameterValueParser
+		private readonly ParameterNormalizer       $parameterNormalizer,
+		private readonly ParameterValueParser      $parameterValueParser
 	)
 	{
 		parent::__construct();
@@ -1925,8 +1926,14 @@ class ImportPartKeeprCommand
 		$bar = $io->createProgressBar($pk->executeQuery("SELECT COUNT(*) FROM $pkTable")->fetchOne());
 		$bar->start();
 		$this->connect->beginTransaction();
+		// ORM 3.x still allows array access on the mapping objects, but ORM 4.x
+		// drops it (deprecated on JoinTableMapping since 3.1). Reach the join
+		// table name through the typed API instead.
+		$prefixesMapping = $this->entityManager->getClassMetadata(Unit::class)->getAssociationMapping('prefixes');
+		assert($prefixesMapping instanceof ManyToManyOwningSideMapping);
+		$prefixesJoinTable = $prefixesMapping->joinTable->name;
 		foreach ($pk->executeQuery("SELECT * FROM $pkTable")->fetchAllAssociative() as $row) {
-			$qb->insert($this->entityManager->getClassMetadata(Unit::class)->getAssociationMapping('prefixes')['joinTable']['name'])
+			$qb->insert($prefixesJoinTable)
 				->values([
 					'unit_id' => ':unit_id',
 					'siprefix_id' => ':siprefix_id'

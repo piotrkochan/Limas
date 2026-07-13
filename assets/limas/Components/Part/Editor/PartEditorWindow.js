@@ -186,9 +186,74 @@ Ext.define('Limas.PartEditorWindow', {
 		}
 		this.saveButtonReenableTask.delay(30000);
 
+		// Duplicate detection runs only for new parts (creation). The backend
+		// still enforces the 'block' policy on POST as a safety net; here we
+		// give a friendly confirm (warn) / alert (block) before saving.
+		if (this.editor.record && this.editor.record.phantom) {
+			this.checkDuplicatesThenSave();
+			return;
+		}
+		this.doSave();
+	},
+	doSave: function () {
 		if (!this.editor._onItemSave()) {
 			this.saveButton.enable();
 		}
+	},
+	checkDuplicatesThenSave: function () {
+		let record = this.editor.record;
+		this.editor.getForm().updateRecord(record);
+
+		let name = record.get('name') || '',
+			mpn = '';
+		if (record.manufacturers) {
+			record.manufacturers().each(function (pm) {
+				if (!mpn && pm.get('partNumber')) {
+					mpn = pm.get('partNumber');
+				}
+			});
+		}
+
+		Ext.Ajax.request({
+			url: Limas.getBasePath() + '/api/parts/checkDuplicate',
+			method: 'GET',
+			params: {name: name, mpn: mpn},
+			headers: Limas.Auth.AuthenticationProvider.getAuthenticationProvider().getHeaders(),
+			success: Ext.bind(function (response) {
+				let data = Ext.decode(response.responseText, true) || {};
+				let dupes = data.duplicates || [];
+				if (data.mode === 'off' || dupes.length === 0) {
+					this.doSave();
+					return;
+				}
+				let names = dupes.slice(0, 5).map(function (d) {
+					return Ext.String.htmlEncode(d.name);
+				}).join(', ');
+				if (dupes.length > 5) {
+					names += ', …';
+				}
+				if (data.mode === 'block') {
+					this.saveButton.enable();
+					Ext.Msg.alert(i18n('Duplicate part'),
+						Ext.String.format(i18n('A part matching this name / manufacturer part number already exists ({0}). Creation is blocked by policy.'), names));
+					return;
+				}
+				// warn
+				Ext.Msg.confirm(i18n('Duplicate part'),
+					Ext.String.format(i18n('A part matching this name / manufacturer part number already exists ({0}). Create anyway?'), names),
+					function (btn) {
+						if (btn === 'yes') {
+							this.doSave();
+						} else {
+							this.saveButton.enable();
+						}
+					}, this);
+			}, this),
+			failure: Ext.bind(function () {
+				// Don't block the user on a check failure — just save
+				this.doSave();
+			}, this)
+		});
 	},
 	onItemSaved: function () {
 		this.saveButton.enable();

@@ -123,7 +123,7 @@ final class ParameterValueParser
 		// Split off `@trailing` context (e.g. "2.5 V @ 25°C"). The trailing
 		// segment stays in `valueText`; the numeric extraction continues
 		// on the head.
-		$value = trim($p->rawValue);
+		$value = $this->normaliseCjk(trim($p->rawValue));
 		if ($value === '') {
 			return;
 		}
@@ -143,8 +143,11 @@ final class ParameterValueParser
 		}
 
 		// Range patterns — try longest separators first ("..." before ".", "to" with surrounding whitespace before raw chars)
+		// `[-+]?` on both ends: distributors write the upper bound as "+70" and
+		// even glue the sign to the separator ("0°C~+70°C"), so accept a leading
+		// plus and keep it out of the unit-skip class between min and separator
 		$rangeSep = '(?:\.{2,}|…|~|\s+to\s+)';
-		if (preg_match('#^(?<min>-?\d+(?:[.,]\d+)?)\s*[^0-9-]*\s*' . $rangeSep . '\s*(?<max>-?\d+(?:[.,]\d+)?)\s*(?<rest>.*)$#u', $value, $m) === 1) {
+		if (preg_match('#^(?<min>[-+]?\d+(?:[.,]\d+)?)\s*[^0-9+-]*\s*' . $rangeSep . '\s*(?<max>[-+]?\d+(?:[.,]\d+)?)\s*(?<rest>.*)$#u', $value, $m) === 1) {
 			$p->numericMin = $this->toFloat($m['min']);
 			$p->numericMax = $this->toFloat($m['max']);
 			$this->splitUnit(trim($m['rest']), $p);
@@ -162,15 +165,15 @@ final class ParameterValueParser
 			return;
 		}
 
-		// Plain single value
-		if (preg_match('/^(?<n>-?\d+(?:[.,]\d+)?)\s*(?<rest>.*)$/u', $value, $m) === 1) {
+		// Plain single value (accept a leading "+", e.g. "+70°C")
+		if (preg_match('/^(?<n>[-+]?\d+(?:[.,]\d+)?)\s*(?<rest>.*)$/u', $value, $m) === 1) {
 			$p->numericValue = $this->toFloat($m['n']);
 			$this->splitUnit(trim($m['rest']), $p);
 			return;
 		}
 
 		// Pure text — nothing to parse. Leave numeric fields null;
-		// frontend will fall back to stringValue at apply time.
+		// frontend will fall back to stringValue at apply time
 	}
 
 	/**
@@ -235,6 +238,40 @@ final class ParameterValueParser
 		// raw display still has a unit string in the frontend.
 		$p->unit = $token;
 		return false;
+	}
+
+	/**
+	 * Fold CJK / full-width punctuation to its ASCII equivalent before parsing.
+	 * LCSC and other Asian distributors ship values like "0℃～+70℃" (full-width
+	 * tilde U+FF5E, degree-celsius glyph U+2103) or full-width digits — none of
+	 * which the range/number regexes or the Unit-store lookup would otherwise
+	 * match, so temperature ranges never split and units never resolve. Only
+	 * the working copy is folded; rawValue keeps the vendor's original glyphs.
+	 */
+	private function normaliseCjk(string $value): string
+	{
+		return strtr($value, [
+			"\u{FF5E}" => '~',         // full-width tilde
+			"\u{301C}" => '~',         // wave dash
+			"\u{FF0B}" => '+',         // full-width plus
+			"\u{FF0D}" => '-',         // full-width hyphen-minus
+			"\u{2212}" => '-',         // minus sign
+			"\u{2103}" => "\u{00B0}C", // ℃ → °C
+			"\u{2109}" => "\u{00B0}F", // ℉ → °F
+			"\u{2126}" => "\u{03A9}",  // Ω ohm sign → Greek omega (canonical)
+			"\u{FF0E}" => '.',         // full-width full stop
+			"\u{FF0C}" => ',',         // full-width comma
+			"\u{FF10}" => '0',
+			"\u{FF11}" => '1',
+			"\u{FF12}" => '2',
+			"\u{FF13}" => '3',
+			"\u{FF14}" => '4',
+			"\u{FF15}" => '5',
+			"\u{FF16}" => '6',
+			"\u{FF17}" => '7',
+			"\u{FF18}" => '8',
+			"\u{FF19}" => '9'
+		]);
 	}
 
 	private function toFloat(string $numeric): float

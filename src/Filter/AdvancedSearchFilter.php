@@ -7,6 +7,7 @@ use ApiPlatform\Doctrine\Orm\Util\QueryNameGeneratorInterface;
 use ApiPlatform\Metadata\Exception\ItemNotFoundException;
 use ApiPlatform\Metadata\IriConverterInterface;
 use ApiPlatform\Metadata\Operation;
+use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Query\Expr\Comparison;
 use Doctrine\ORM\Query\Expr\Composite;
 use Doctrine\ORM\Query\Expr\Func;
@@ -16,12 +17,21 @@ use Limas\Entity\PartParameter;
 use Limas\Service\FilterService;
 use Nette\Utils\Json;
 use Symfony\Component\HttpFoundation\RequestStack;
+use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
 
 
 class AdvancedSearchFilter
 	implements QueryCollectionExtensionInterface
 {
+	/**
+	 * Cap on association-chain depth in a filter/sort property path. Blocks a
+	 * caller from forcing arbitrarily deep JOIN chains (a.b.c.d.e…) as query
+	 * amplification. Legitimate Limas paths are 1 level (storageLocation.name,
+	 * parameters.value); 4 leaves generous headroom.
+	 */
+	private const int MAX_ASSOCIATION_DEPTH = 4;
+
 	private array $aliases = [];
 	private int $parameterCount = 0;
 	private array $joins = [];
@@ -32,6 +42,7 @@ class AdvancedSearchFilter
 		private readonly FilterService             $filterService,
 		private readonly IriConverterInterface     $iriConverter,
 		private readonly PropertyAccessorInterface $propertyAccessor,
+		private readonly EntityManagerInterface    $entityManager,
 		private readonly ?RequestStack             $requestStack = null/*,
 
 		array                                      $properties = null*/
@@ -381,6 +392,68 @@ class AdvancedSearchFilter
 
 		$properties = $this->extractConfiguration($filter, $order);
 
+		$this->assertPropertiesAllowed($properties['filters'], $properties['sorters'], $resourceClass);
+
 		$this->filter($queryBuilder, $properties['filters'], $properties['sorters']);
+	}
+
+	/**
+	 * Reject filter/sort property paths that don't map to a real field or
+	 * association on the queried entity, and cap association-chain depth. This
+	 * turns an attacker's arbitrary or deeply-nested path — which would
+	 * otherwise leak a DQL parse error (existence oracle) or force a huge JOIN
+	 * chain (query-amplification DoS) — into a clean 400. Values are already
+	 * parameter-bound elsewhere, so this governs *which* columns/relations may
+	 * be referenced, not injection.
+	 */
+	private function assertPropertiesAllowed(array $filters, array $sorters, string $resourceClass): void
+	{
+		foreach ($filters as $filter) {
+			$this->assertFilterAllowed($filter, $resourceClass);
+		}
+
+		foreach ($sorters as $sorter) {
+			// paramValues.<name> is a synthetic association resolved via a correlated subquery, not a real Doctrine relation — allow it
+			if ($sorter->getAssociation() === 'paramValues') {
+				continue;
+			}
+			$this->assertPathExists($resourceClass, $sorter->getAssociation(), $sorter->getProperty());
+		}
+	}
+
+	private function assertFilterAllowed(Filter $filter, string $resourceClass): void
+	{
+		if ($filter->hasSubFilters()) {
+			foreach ($filter->getSubFilters() as $subFilter) {
+				$this->assertFilterAllowed($subFilter, $resourceClass);
+			}
+			return;
+		}
+
+		$this->assertPathExists($resourceClass, $filter->getAssociation(), $filter->getProperty());
+	}
+
+	private function assertPathExists(string $resourceClass, ?string $association, string $property): void
+	{
+		$metadata = $this->entityManager->getClassMetadata($resourceClass);
+
+		if ($association !== null && $association !== '') {
+			$segments = explode('.', $association);
+			if (count($segments) > self::MAX_ASSOCIATION_DEPTH) {
+				throw new BadRequestHttpException(sprintf('Filter association "%s" is nested too deeply.', $association));
+			}
+			foreach ($segments as $segment) {
+				if (!$metadata->hasAssociation($segment)) {
+					throw new BadRequestHttpException(sprintf('Unknown filter association "%s".', $association));
+				}
+				$metadata = $this->entityManager->getClassMetadata($metadata->getAssociationTargetClass($segment));
+			}
+		}
+
+		// `@id` is the Hydra IRI alias for the identifier
+		$field = $property === '@id' ? 'id' : $property;
+		if (!$metadata->hasField($field) && !$metadata->hasAssociation($field)) {
+			throw new BadRequestHttpException(sprintf('Unknown filter property "%s".', $property));
+		}
 	}
 }

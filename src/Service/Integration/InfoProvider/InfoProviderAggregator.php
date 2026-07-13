@@ -865,7 +865,8 @@ final class InfoProviderAggregator
 			$out[] = [
 				'name' => $adapter->getName(),
 				'configured' => $adapter->isConfigured(),
-				'capabilities' => array_map(static fn(ProviderCapability $c) => $c->value, $adapter->getCapabilities())
+				'capabilities' => array_map(static fn(ProviderCapability $c) => $c->value, $adapter->getCapabilities()),
+				'attribution' => $adapter->getAttribution()
 			];
 		}
 		return $out;

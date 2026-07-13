@@ -105,7 +105,10 @@ final readonly class AggregatorImporter
 				->setOrderNumber($ds->sourceSku);
 			if ($ds->priceBreaks !== []) {
 				$first = $ds->priceBreaks[0];
-				$pd->setPrice((string)$first->price);
+				// Fixed-point, not (string)$float — a tiny price would otherwise
+				// stringify as "1.0E-5" and the DECIMAL(13,4) column can't parse
+				// scientific notation. 4 dp matches the column scale.
+				$pd->setPrice(sprintf('%.4f', $first->price));
 				$pd->setPackagingUnit(max($first->quantity, 1));
 				if ($ds->currency !== null && $ds->currency !== '') {
 					$pd->setCurrency(substr($ds->currency, 0, 3));

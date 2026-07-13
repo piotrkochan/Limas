@@ -32,6 +32,10 @@ readonly class JWTCreated
 		// the type so phpstan stops asking for getId() on bare UserInterface.
 		if ($user instanceof \Limas\Entity\User) {
 			$payload['id'] = $user->getId();
+			// Password-changed-at stamp — JWTDecoded rejects a token whose
+			// stamp predates the user's current one, so a password change
+			// instantly invalidates outstanding access tokens
+			$payload['pca'] = $user->getPasswordChangedAt();
 		}
 		$event->setData($payload);
 

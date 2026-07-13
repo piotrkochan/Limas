@@ -4,6 +4,8 @@ namespace Limas\Controller\Actions;
 
 use ApiPlatform\Doctrine\Orm\State\ItemProvider;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\NoResultException;
+use Limas\Entity\RefreshToken;
 use Limas\Entity\User;
 use Limas\Entity\UserPreference;
 use Limas\Exceptions\OldPasswordWrongException;
@@ -18,6 +20,7 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Exception\UnprocessableEntityHttpException;
 use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Serializer\Normalizer\AbstractNormalizer;
@@ -61,9 +64,31 @@ class UserActions
 	}
 
 	#[Route(path: '/api/users/logout')]
-	public function logoutAction()
+	public function logoutAction(): JsonResponse
 	{
-		// @todo
+		// Kill the server-side refresh token so a copied token can't be used to
+		// mint fresh access tokens after logout; the JWT itself dies on its own
+		// short TTL. Then drop the auth cookies client-side.
+		$this->revokeRefreshTokens($this->userService->getCurrentUser()->getUserIdentifier());
+
+		$response = new JsonResponse(['success' => true]);
+		$response->headers->clearCookie('BEARER', '/');
+		$response->headers->clearCookie('refresh_token', '/');
+		return $response;
+	}
+
+	/**
+	 * Delete every stored refresh token for a user — used on logout and after
+	 * a password change so old sessions can't be resurrected via refresh
+	 */
+	private function revokeRefreshTokens(string $username): void
+	{
+		$this->entityManager->createQueryBuilder()
+			->delete(RefreshToken::class, 'r')
+			->where('r.username = :username')
+			->setParameter('username', $username)
+			->getQuery()
+			->execute();
 	}
 
 	public function PostAction(User $data): User
@@ -71,8 +96,25 @@ class UserActions
 		if ($this->userService->checkUserLimit() === true) {
 			throw new UserLimitReachedException;
 		}
-		$data->setProvider($this->userService->getBuiltinProvider())
-			->setPassword($this->userPasswordHasher->hashPassword($data, $data->getNewPassword()))
+		$provider = $this->userService->getBuiltinProvider();
+		// Friendly duplicate-username error instead of a raw SQL unique-key
+		// 500 from the username_provider constraint. Scoped to create only;
+		// the PUT flow (which reuses the same username) must not trip this.
+		try {
+			$this->userService->getUser((string)$data->getUsername(), $provider);
+			throw new UnprocessableEntityHttpException('This username is already taken.');
+		} catch (NoResultException) {
+			// Good — username is free
+		}
+		// Prior to this guard an empty newPassword hit the PasswordHasher
+		// with null and blew up with a cryptic TypeError further downstream;
+		// enforce it as a validation error at the entry point instead
+		$newPassword = $data->getNewPassword();
+		if ($newPassword === null || $newPassword === '') {
+			throw new UnprocessableEntityHttpException('A password is required when creating a new user.');
+		}
+		$data->setProvider($provider)
+			->setPassword($this->userPasswordHasher->hashPassword($data, $newPassword))
 			->setNewPassword(null);
 		$this->entityManager->flush();
 
@@ -115,6 +157,8 @@ class UserActions
 		$data->setPassword($this->userPasswordHasher->hashPassword($data, $data->getNewPassword()))
 			->setNewPassword(null);
 		$this->entityManager->flush();
+		// An admin resetting a user's password force-logs them out everywhere
+		$this->revokeRefreshTokens($data->getUserIdentifier());
 		return $data;
 	}
 
@@ -150,6 +194,8 @@ class UserActions
 		$data->setPassword($this->userPasswordHasher->hashPassword($data, $decoded['newpassword']));
 		$this->entityManager->persist($data);
 		$this->entityManager->flush();
+		// Changing your password invalidates outstanding refresh tokens (the JWTs already die via the passwordChangedAt claim)
+		$this->revokeRefreshTokens($data->getUserIdentifier());
 
 		return $data;
 	}

@@ -48,10 +48,27 @@ async function waitForCategoryInTree(page, categoryName) {
 }
 
 /**
- * Helper to select a category by name in the tree
+ * Select a category by name in whichever category tree is currently visible.
+ * Uses the Ext selection model rather than a DOM click on the node text: a
+ * DOM click hangs ("performing click action") whenever a floating window/mask
+ * or an in-flight tree re-render covers the node, which flakes intermittently.
+ * Selecting via the model fires the same selectionchange the app reacts to
+ * (e.g. enabling the tree's delete button).
  */
 async function selectCategoryByName(page, categoryName) {
-	await page.click(`text="${categoryName}"`);
+	await page.evaluate((name) => {
+		const trees = Ext.ComponentQuery.query('treepanel').filter((t) => t.isVisible());
+		for (const tree of trees) {
+			const node = tree.getRootNode().findChildBy(
+				(n) => (n.get('name') || n.data.text) === name, null, true
+			);
+			if (node) {
+				tree.getSelectionModel().select(node);
+				return;
+			}
+		}
+		throw new Error('Category node not found in any visible tree: ' + name);
+	}, categoryName);
 	await page.waitForTimeout(300);
 }
 

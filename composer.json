@@ -23,9 +23,15 @@
 	"require": {
 		"php": ">=8.4",
 		"ext-ctype": "*",
+		"ext-curl": "*",
 		"ext-dom": "*",
 		"ext-fileinfo": "*",
+		"ext-gd": "*",
 		"ext-iconv": "*",
+		"ext-mbstring": "*",
+		"ext-openssl": "*",
+		"ext-pdo": "*",
+		"ext-pdo_mysql": "*",
 		"ext-redis": "*",
 		"api-platform/core": "^4.2",
 		"atelierspierrot/famfamfam-silk-sprite": "^1.0",
@@ -78,6 +84,7 @@
 		"symfony/web-link": "8.1.*",
 		"symfony/webpack-encore-bundle": "^2.3",
 		"symfony/yaml": "8.1.*",
+		"tecnickcom/tc-lib-barcode": "^2.11",
 		"twig/twig": "^2.12|^3.22"
 	},
 	"config": {

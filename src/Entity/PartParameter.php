@@ -16,6 +16,12 @@ use Symfony\Component\Serializer\Attribute\Groups;
 
 #[ORM\Entity]
 #[ORM\HasLifecycleCallbacks]
+// Meta-part matching (PartService::getMatchingMetaParts) and the parameter
+// pickers filter on `name` + a value comparison. Without these the largest
+// table in the DB was full-scanned per criterion. utf8mb4 needs a prefix on
+// the VARCHAR columns (764 bytes, same tactic as the categoryPath indexes).
+#[ORM\Index(name: 'idx_partparameter_name_normalized', columns: ['name', 'normalizedValue'], options: ['lengths' => [191, null]])]
+#[ORM\Index(name: 'idx_partparameter_name_string', columns: ['name', 'stringValue'], options: ['lengths' => [191, 191]])]
 #[ApiResource(
 	operations: [
 		new GetCollection,

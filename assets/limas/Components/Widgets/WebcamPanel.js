@@ -70,6 +70,9 @@ Ext.define('Limas.WebcamPanel', {
 		let ctx = this.canvas.getContext('2d');
 		ctx.drawImage(this.video, 0, 0, this.video.videoWidth, this.video.videoHeight);
 
+		this.takePhotoButton.disable();
+		this.takePhotoButton.setText(i18n('Uploading...'));
+
 		Ext.Ajax.request({
 			// Might need to adjust the path, depending on if we are uploading a file or image
 			url: Limas.getBasePath() + '/api/temp_uploaded_files/webcamUpload',
@@ -77,12 +80,16 @@ Ext.define('Limas.WebcamPanel', {
 			success: function (response) {
 				this.fireEvent('fileUploaded', Ext.decode(response.responseText));
 			},
-			//@todo implement failure handler
+			// Without this the button stays disabled at "Uploading..." forever on
+			// a failed upload — the user would have to reopen the panel. Restore
+			// it and surface the error instead.
+			failure: function () {
+				this.takePhotoButton.enable();
+				this.takePhotoButton.setText(i18n('Take picture and upload'));
+				Ext.Msg.alert(i18n('Upload failed'), i18n('The photo could not be uploaded. Please try again.'));
+			},
 			scope: this
 		});
-
-		this.takePhotoButton.disable();
-		this.takePhotoButton.setText(i18n('Uploading...'));
 	},
 	_onBeforeDestroy: function () {
 		// stream.stop is deprecated for newer chrome versions, use getTracks instead

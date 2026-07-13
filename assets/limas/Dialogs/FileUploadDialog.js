@@ -22,8 +22,8 @@ Ext.define('Limas.FileUploadDialog', {
 				iconCls: 'fugue-icon drive-upload',
 				handler: Ext.bind(function () {
 					let form = this.form.getForm(),
-						vFile=this.fileField.getValue(),
-						vUrl=this.urlField.getValue();
+						vFile = this.fileField.getValue(),
+						vUrl = this.urlField.getValue();
 
 					if (vFile === '' && vUrl === '') {
 						Ext.Msg.alert(i18n('Error'), i18n('Please select a file to upload or enter an URL'));
@@ -80,7 +80,16 @@ Ext.define('Limas.FileUploadDialog', {
 			fieldLabel: i18n('URL'),
 			name: 'url',
 			anchor: '100%',
-			vtype: 'url',
+			// Accept a normal http(s) URL OR an inline data: URI (the backend
+			// decodes those the same way it downloads a URL). Empty is valid
+			// too — the user may be using the file field instead. The built-in
+			// 'url' vtype rejects data: URIs, so validate by hand.
+			validator: function (value) {
+				if (value === '' || /^data:/i.test(value) || Ext.form.field.VTypes.url(value)) {
+					return true;
+				}
+				return Ext.form.field.VTypes.urlText;
+			},
 			listeners: {
 				change: {
 					fn: function () {
@@ -132,7 +141,7 @@ Ext.define('Limas.FileUploadDialog', {
 			listeners: {
 				change: {
 					fn: function () {
-						let uf=this.urlField;
+						let uf = this.urlField;
 						if (this.fileField.getValue() !== '') {
 							uf.disable().hide();
 						} else {

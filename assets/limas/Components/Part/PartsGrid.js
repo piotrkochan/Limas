@@ -160,6 +160,25 @@ Ext.define('Limas.PartsGrid', {
 			this.topToolbar.insert(2, this.addFromTemplateButton);
 		}
 
+		// "Print labels" acts on the current grid selection — same
+		// helper as StorageLocationGrid's toolbar button. Enabled for
+		// any non-empty selection so a single row works too. Landed
+		// right after Duplicate so the "per-selection actions" cluster
+		// stays visually together
+		this.printLabelsButton = Ext.create('Ext.button.Button', {
+			text: i18n('Print labels'),
+			iconCls: 'fugue-icon printer',
+			tooltip: i18n('Print labels for the selected parts'),
+			disabled: true,
+			handler: Ext.bind(this.onPrintLabelsClick, this)
+		});
+		if (this.enableEditing) {
+			this.topToolbar.insert(3, this.printLabelsButton);
+		}
+		this.on('selectionchange', function (sm, selections) {
+			this.printLabelsButton.setDisabled(!selections || selections.length === 0);
+		}, this);
+
 		this.createMetaPartButton = Ext.create('Ext.button.Button', {
 			iconCls: 'web-icon bricks',
 			text: i18n('Add Meta-Part'),
@@ -283,6 +302,23 @@ Ext.define('Limas.PartsGrid', {
 		if (record) {
 			this.fireEvent('editPart', record);
 		}
+	},
+	onPrintLabelsClick: function () {
+		let ids = this.getSelectionModel().getSelection()
+			.map(function (rec) {
+				return rec.get('@id') || '';
+			})
+			.map(function (iri) {
+				let m = iri.match(/\/(\d+)$/);
+				return m ? parseInt(m[1], 10) : null;
+			})
+			.filter(function (id) {
+				return id !== null;
+			});
+		if (ids.length === 0) {
+			return;
+		}
+		Limas.printLabelSheet({parts: ids});
 	},
 	defineColumns: function () {
 		this.columns = [

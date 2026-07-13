@@ -27,20 +27,34 @@ use Symfony\Component\Validator\Constraints as Assert;
 #[ORM\UniqueConstraint(name: 'username_provider', fields: ['username', 'provider'])]
 #[ApiResource(
 	operations: [
-		new GetCollection,
-		new Post(controller: UserActions::class . '::PostAction'),
+		// User management is admin-only. Reading/deleting/creating other
+		// users and listing the directory require ROLE_ADMIN; a user may read
+		// their own record and change their own password (the latter still
+		// verifies the old password in changePasswordAction). Without this,
+		// any authenticated user could PUT /api/users/{id} with a new
+		// password and take over any non-protected account.
+		new GetCollection(security: "is_granted('ROLE_ADMIN')"),
+		new Post(
+			controller: UserActions::class . '::PostAction',
+			security: "is_granted('ROLE_ADMIN')"
+		),
 //		new GetCollection(
 //			uriTemplate: 'users/get_user_providers',
 //			controller: UserActions::class . '::GetProvidersAction'
 //		),
-		new Get(controller: UserActions::class . '::getAction'),
+		new Get(
+			controller: UserActions::class . '::getAction',
+			security: "is_granted('ROLE_ADMIN') or object == user"
+		),
 		new Put(
 			uriTemplate: 'users/{id}',
 			controller: UserActions::class . '::PutUserAction',
+			security: "is_granted('ROLE_ADMIN')"
 		),
 		new Delete(
 			uriTemplate: 'users/{id}',
-			controller: UserActions::class . '::DeleteUserAction'
+			controller: UserActions::class . '::DeleteUserAction',
+			security: "is_granted('ROLE_ADMIN')"
 		),
 		new Patch(
 			uriTemplate: 'users/{id}/changePassword',
@@ -51,6 +65,7 @@ use Symfony\Component\Validator\Constraints as Assert;
 			denormalizationContext: [
 				'groups' => ['changePassword:write']
 			],
+			security: "is_granted('ROLE_ADMIN') or object == user",
 			name: 'changePassword'
 		)
 	],
@@ -67,6 +82,12 @@ class User
 	#[ORM\Column(type: Types::STRING, nullable: true)]
 	#[Groups(['login:write'])]
 	private ?string $password = null;
+	// Unix timestamp of the last password change. Embedded as a JWT claim at
+	// issue time; a token whose claim predates this value is rejected, so a
+	// password change instantly invalidates every previously issued access
+	// token. Nullable: legacy rows have no value until their next change.
+	#[ORM\Column(type: Types::INTEGER, nullable: true)]
+	private ?int $passwordChangedAt = null;
 	#[VirtualField(type: Types::STRING)]
 	#[Groups(['default'])]
 	private ?string $newPassword = null;
@@ -221,7 +242,16 @@ class User
 	public function setPassword(#[\SensitiveParameter] ?string $password): self
 	{
 		$this->password = $password;
+		// Any password change bumps the stamp so previously issued JWTs (which
+		// carry the old value) stop validating. Covers every path — create,
+		// admin edit, self-service change.
+		$this->passwordChangedAt = time();
 		return $this;
+	}
+
+	public function getPasswordChangedAt(): ?int
+	{
+		return $this->passwordChangedAt;
 	}
 
 	public function getNewPassword(): ?string

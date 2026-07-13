@@ -20,6 +20,7 @@ class UserDataLoader
 		$admin = (new User('admin'))
 			->setPassword('admin')
 			->setEmail('foo@bar.com')
+			->setAdmin(true)
 			->setProvider($builtin);
 
 		$manager->persist($admin);

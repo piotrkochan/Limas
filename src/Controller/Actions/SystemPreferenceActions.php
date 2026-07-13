@@ -8,6 +8,7 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 
 class SystemPreferenceActions
@@ -30,6 +31,11 @@ class SystemPreferenceActions
 		return new JsonResponse($data);
 	}
 
+	// Writing global system configuration is admin-only — a normal user must
+	// not be able to flip auth policy, limits, duplicate-detection mode, etc.
+	// Reads (getAction) stay open to any authenticated user; the frontend
+	// needs them (label config, etc.).
+	#[IsGranted('ROLE_ADMIN')]
 	#[Route(path: '/api/system_preferences', name: 'SystemPreferenceSet', methods: ['POST', 'PUT'])]
 	public function setAction(Request $request): JsonResponse
 	{

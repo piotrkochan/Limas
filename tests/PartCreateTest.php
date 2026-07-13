@@ -20,6 +20,12 @@ use Symfony\Component\HttpFoundation\Response;
 class PartCreateTest
 	extends WebTestCase
 {
+	// Inline 1x1 images keep the upload tests offline & deterministic — no
+	// dependency on a flaky external host. The backend decodes the data: URI
+	// through the same sink as a real download.
+	private const string PNG_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAADElEQVQImWPgEpEDAABoAD0BFY5BAAAAAElFTkSuQmCC';
+	private const string JPEG_DATA_URI = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD//gA7Q1JFQVRPUjogZ2QtanBlZyB2MS4wICh1c2luZyBJSkcgSlBFRyB2ODApLCBxdWFsaXR5ID0gOTAK/9sAQwADAgIDAgIDAwMDBAMDBAUIBQUEBAUKBwcGCAwKDAwLCgsLDQ4SEA0OEQ4LCxAWEBETFBUVFQwPFxgWFBgSFBUU/9sAQwEDBAQFBAUJBQUJFA0LDRQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU/8AAEQgAAQABAwERAAIRAQMRAf/EAB8AAAEFAQEBAQEBAAAAAAAAAAABAgMEBQYHCAkKC//EALUQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq8fLz9PX29/j5+v/EAB8BAAMBAQEBAQEBAQEAAAAAAAABAgMEBQYHCAkKC//EALURAAIBAgQEAwQHBQQEAAECdwABAgMRBAUhMQYSQVEHYXETIjKBCBRCkaGxwQkjM1LwFWJy0QoWJDThJfEXGBkaJicoKSo1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoKDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uLj5OXm5+jp6vLz9PX29/j5+v/aAAwDAQACEQMRAD8A/NqvTPPP/9k=';
+
 	protected ReferenceRepository $fixtures;
 
 
@@ -93,7 +99,7 @@ class PartCreateTest
 		$client->request(
 			'POST',
 			'/api/temp_uploaded_files/upload',
-			['url' => 'https://httpbin.org/image/png']
+			['url' => self::PNG_DATA_URI]
 		);
 		self::assertEquals(Response::HTTP_OK, $client->getResponse()->getStatusCode());
 		$uploadResponse = Json::decode($client->getResponse()->getContent());
@@ -259,11 +265,11 @@ class PartCreateTest
 		$client = $this->makeAuthenticatedClient();
 
 		// Upload first URL
-		$client->request('POST', '/api/temp_uploaded_files/upload', ['url' => 'https://httpbin.org/image/png']);
+		$client->request('POST', '/api/temp_uploaded_files/upload', ['url' => self::PNG_DATA_URI]);
 		$tempFileId1 = Json::decode($client->getResponse()->getContent())->response->{'@id'};
 
 		// Upload second URL
-		$client->request('POST', '/api/temp_uploaded_files/upload', ['url' => 'https://httpbin.org/image/jpeg']);
+		$client->request('POST', '/api/temp_uploaded_files/upload', ['url' => self::JPEG_DATA_URI]);
 		$tempFileId2 = Json::decode($client->getResponse()->getContent())->response->{'@id'};
 
 		// Get references
@@ -313,7 +319,7 @@ class PartCreateTest
 		$tempFileId1 = Json::decode($client->getResponse()->getContent())->response->{'@id'};
 
 		// Upload URL
-		$client->request('POST', '/api/temp_uploaded_files/upload', ['url' => 'https://httpbin.org/image/png']);
+		$client->request('POST', '/api/temp_uploaded_files/upload', ['url' => self::PNG_DATA_URI]);
 		$tempFileId2 = Json::decode($client->getResponse()->getContent())->response->{'@id'};
 
 		// Get references

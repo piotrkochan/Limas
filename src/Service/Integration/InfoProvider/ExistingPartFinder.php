@@ -57,7 +57,7 @@ final readonly class ExistingPartFinder
 				$keyForCandidate[$i] = null; // unknown manufacturer — cannot already be in DB
 				continue;
 			}
-			$mpnNorm = ManufacturerCanonicalizer::normalize($mpn);
+			$mpnNorm = self::normalizeMpn($mpn);
 			$key = $canonical->getId() . '|' . $mpnNorm;
 			$keyForCandidate[$i] = $key;
 			$pairs[$key] = [$canonical->getId(), $mpnNorm];
@@ -83,7 +83,7 @@ final readonly class ExistingPartFinder
 		foreach ($pairs as [$mfrId, $mpnNorm]) {
 			$where->add($qb->expr()->andX(
 				$qb->expr()->eq('mfr.id', ':mfr' . $paramIdx),
-				$qb->expr()->eq('LOWER(pm.partNumber)', ':mpn' . $paramIdx)
+				$qb->expr()->eq('LOWER(TRIM(pm.partNumber))', ':mpn' . $paramIdx)
 			));
 			$qb->setParameter('mfr' . $paramIdx, $mfrId);
 			$qb->setParameter('mpn' . $paramIdx, $mpnNorm);
@@ -101,7 +101,7 @@ final readonly class ExistingPartFinder
 			if ($mfr === null || $part === null || $pm->getPartNumber() === null) {
 				continue;
 			}
-			$key = $mfr->getId() . '|' . ManufacturerCanonicalizer::normalize($pm->getPartNumber());
+			$key = $mfr->getId() . '|' . self::normalizeMpn($pm->getPartNumber());
 			if (isset($partInfoByKey[$key])) {
 				continue; // first match wins; multi-mfr Part is edge-case
 			}
@@ -129,10 +129,21 @@ final readonly class ExistingPartFinder
 
 	private function totalStock(Part $part): int
 	{
-		$total = 0;
-		foreach ($part->getStockLevels() as $level) {
-			$total += $level->getStockLevel();
-		}
-		return $total;
+		// Use the maintained aggregate scalar rather than iterating the lazy
+		// stockLevels collection — the latter is an N+1 over the matched set
+		return $part->getStockLevel() ?? 0;
+	}
+
+	/**
+	 * MPN normalisation for local-Part matching: lowercase + trim only.
+	 * Deliberately NOT ManufacturerCanonicalizer::normalize(), whose
+	 * corporate-suffix stripping ("… Co", "… Ltd") is meaningful for company
+	 * names but would mangle part numbers. It must also mirror the SQL side
+	 * (LOWER(TRIM(partNumber))) exactly, so a candidate never silently fails
+	 * to match an existing Part.
+	 */
+	private static function normalizeMpn(string $mpn): string
+	{
+		return mb_strtolower(trim($mpn));
 	}
 }

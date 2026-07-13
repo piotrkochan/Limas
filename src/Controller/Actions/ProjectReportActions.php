@@ -4,6 +4,7 @@ namespace Limas\Controller\Actions;
 
 use ApiPlatform\Doctrine\Orm\State\ItemProvider;
 use Doctrine\ORM\EntityManagerInterface;
+use Limas\Entity\Project;
 use Limas\Entity\ProjectPart;
 use Limas\Entity\Report;
 use Limas\Service\PartService;
@@ -34,6 +35,27 @@ class ProjectReportActions
 
 	public function createReportAction(Report $data): JsonResponse
 	{
+		// Prime each project's parts collection AND its Part in one query, so
+		// the nested loop below doesn't lazy-load the collection per project
+		// and the Part per project-part (N+1 across the whole report)
+		$projectIds = [];
+		foreach ($data->getReportProjects() as $reportProject) {
+			$project = $reportProject->getProject();
+			if ($project !== null && $project->getId() !== null) {
+				$projectIds[$project->getId()] = true;
+			}
+		}
+		if ($projectIds !== []) {
+			$this->entityManager->createQueryBuilder()
+				->select('prj', 'pp', 'part')
+				->from(Project::class, 'prj')
+				->leftJoin('prj.parts', 'pp')
+				->leftJoin('pp.part', 'part')
+				->where('prj.id IN (:ids)')
+				->setParameter('ids', array_keys($projectIds))
+				->getQuery()->getResult();
+		}
+
 		foreach ($data->getReportProjects() as $reportProject) {
 			foreach ($reportProject->getProject()->getParts() as $projectPart) {
 				$overage = $projectPart->getOverageType() === ProjectPart::OVERAGE_TYPE_PERCENT

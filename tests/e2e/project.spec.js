@@ -239,8 +239,11 @@ test.describe('Limas Projects UI', () => {
 		// Wait for confirm dialog and click Yes
 		await page.waitForFunction(() => Ext.Msg.isVisible(), {timeout: 3000});
 
-		// Click Yes button - find by inner span text
-		await page.click('span.x-btn-inner:text("Yes")');
+		// Click Yes via the Ext API — a DOM click on the confirm button is
+		// unreliable when a floating window/toast overlays it (esp. against a
+		// real instance in url mode); mirrors how the delete button above and
+		// part-create's save are fired
+		await page.evaluate(() => Ext.Msg.down('#yes').fireHandler());
 
 		// Wait for dialog to close
 		await page.waitForFunction(() => !Ext.Msg.isVisible(), {timeout: 5000});

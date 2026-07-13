@@ -155,8 +155,10 @@ test.describe('Limas Part Create', () => {
 		// Wait for file upload dialog
 		await page.waitForSelector('div.x-window:has-text("File Upload")');
 
-		// Enter URL
-		await page.fill('input[name="url"]', 'https://httpbin.org/image/png');
+		// Enter URL — an inline data: URI keeps the test offline & deterministic
+		// (no flaky external host); the backend decodes it through the same
+		// upload sink as any other attachment
+		await page.fill('input[name="url"]', 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAADElEQVQImWPgEpEDAABoAD0BFY5BAAAAAElFTkSuQmCC');
 
 		// Click upload
 		await page.getByRole('button', {name: 'Upload'}).click();
