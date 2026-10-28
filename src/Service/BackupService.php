@@ -58,6 +58,9 @@ final readonly class BackupService
 			$this->copyConfig($workDir);
 			$this->copyAttachments($workDir . '/data');
 			$this->buildArchive($archivePath, $workDir);
+		} catch (\Throwable $error) {
+			$fs->remove([$archivePath, $archivePath . '.gz']);
+			throw $error;
 		} finally {
 			// Always clear the staging dir, even if any of the above
 			// threw — we don't want orphan plaintext SQL + secrets lying around in /tmp
@@ -77,6 +80,9 @@ final readonly class BackupService
 			'--quick',
 			'--no-tablespaces',
 			'--skip-lock-tables',
+			// The in-cluster MySQL server uses a self-signed CA. Keep TLS enabled,
+			// matching the existing PDO connection, but skip CA verification.
+			'--skip-ssl-verify-server-cert',
 			'--default-character-set=utf8mb4',
 			sprintf('--host=%s', $params['host'] ?? 'localhost'),
 			sprintf('--port=%d', $params['port'] ?? 3306),
@@ -132,12 +138,21 @@ final readonly class BackupService
 	private function copyAttachments(string $targetDir): void
 	{
 		// `data/files/` after the CAS refactor — sha256-keyed blob tree.
-		// Tarball includes the whole `data/` so future-added subdirs
-		// (image cache, fixtures imported into data/) come along too.
+		// Keep future-added data subdirs, but skip backup archives stored on
+		// the same PVC. Including them makes every daily backup grow recursively.
 		if (!is_dir($this->dataDirectory)) {
 			return;
 		}
-		(new Filesystem)->mirror($this->dataDirectory, $targetDir);
+		$source = rtrim($this->dataDirectory, '/');
+		$backupPath = $source . '/backups';
+		$iterator = new \RecursiveIteratorIterator(
+			new \RecursiveCallbackFilterIterator(
+				new \RecursiveDirectoryIterator($source, \FilesystemIterator::SKIP_DOTS),
+				static fn (\SplFileInfo $entry): bool => $entry->getPathname() !== $backupPath
+			),
+			\RecursiveIteratorIterator::SELF_FIRST
+		);
+		(new Filesystem)->mirror($source, $targetDir, $iterator);
 	}
 
 	private function buildArchive(string $archivePath, string $workDir): void
