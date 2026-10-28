@@ -1841,32 +1841,37 @@ Ext.define('Limas.Components.InfoProviderAggregator.SearchPanel', {
 				});
 				return;
 			}
-			let breaks = info.priceBreaks || [];
-			if (breaks.length === 0) {
-				breaks = [{quantity: 1, price: null}];
+			let breaks = [];
+			Ext.Array.each(info.priceBreaks || [], function (b) {
+				let quantity = Number(b.quantity), price = Number(b.price);
+				if (b.price !== null && b.price !== undefined && Number.isInteger(quantity)
+					&& quantity > 0 && Number.isFinite(price) && price >= 0) {
+					breaks.push({quantity: quantity, price: price});
+				}
+			});
+			breaks.sort(function (a, b) { return a.quantity - b.quantity; });
+			let pd = null;
+			for (let k = 0; k < part.distributors().count(); k++) {
+				let existing = part.distributors().getAt(k);
+				if (existing.getDistributor() && existing.getDistributor().getId() === dist.getId()
+					&& existing.get('sku') === (info.sourceSku || '')) {
+					pd = existing;
+					break;
+				}
 			}
-			Ext.Array.each(breaks, function (b) {
-				let pd = Ext.create('Limas.Entity.PartDistributor');
+			if (pd === null) {
+				pd = Ext.create('Limas.Entity.PartDistributor');
 				pd.setDistributor(dist);
 				pd.set('sku', info.sourceSku || '');
 				pd.set('orderNumber', info.sourceSku || '');
-				pd.set('packagingUnit', Math.max(b.quantity || 1, 1));
-				if (info.currency) pd.set('currency', String(info.currency).substring(0, 3));
-				if (b.price !== null && b.price !== undefined) pd.set('price', b.price);
-				let dup = null;
-				for (let k = 0; k < part.distributors().count(); k++) {
-					let existing = part.distributors().getAt(k);
-					if (pd.isPartiallyEqualTo(existing, ['sku', 'packagingUnit', 'currency', 'distributor.name'])) {
-						dup = existing;
-						break;
-					}
-				}
-				if (dup) {
-					if (b.price !== null && b.price !== undefined) dup.set('price', b.price);
-				} else {
-					part.distributors().add(pd);
-				}
-			});
+				pd.set('packagingUnit', breaks.length ? breaks[0].quantity : 1);
+				part.distributors().add(pd);
+			}
+			if (info.currency) pd.set('currency', String(info.currency).substring(0, 3));
+			if (breaks.length) {
+				pd.set('priceBreaks', breaks);
+				pd.set('price', breaks[0].price);
+			}
 		}, this);
 	},
 

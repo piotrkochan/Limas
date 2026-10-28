@@ -8,7 +8,10 @@ use ApiPlatform\Metadata\GetCollection;
 use ApiPlatform\Metadata\IriConverterInterface;
 use Doctrine\ORM\EntityManagerInterface;
 use Limas\Entity\Part;
+use Limas\Entity\PartDistributor;
 use Limas\Entity\PartParameter;
+use Limas\Entity\Project;
+use Limas\Entity\ProjectPart;
 use Limas\Entity\ProjectRun;
 use Limas\Entity\ProjectRunPart;
 use Limas\Entity\StockEntry;
@@ -22,6 +25,7 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
+use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Serializer\Normalizer\AbstractNormalizer;
 use Symfony\Component\Serializer\SerializerInterface;
@@ -201,6 +205,15 @@ class PartActions
 		// partUnit, storageLocation + its category, and projectParts→project
 		// behind getProjectNames). Prime them all up front for the whole page.
 		$this->primeListAssociations($parts);
+		foreach ($parts as $part) {
+			$projectIds = [];
+			foreach ($part->getProjectParts() as $projectPart) {
+				if ($projectPart->getProject() !== null) {
+					$projectIds[] = $projectPart->getProject()->getId();
+				}
+			}
+			$part->setProjectIds(array_values(array_unique($projectIds)));
+		}
 
 		// Optional flat parameter map for custom list-view columns (PK #1217).
 		// Without this the Param Renderer on a column has no PartParameter data
@@ -211,8 +224,106 @@ class PartActions
 		if ($wanted !== []) {
 			$this->attachParamValues($items, $wanted);
 		}
+		if ($request->query->getBoolean('includeDistributorNumbers')) {
+			$this->attachDistributorNumbers($parts);
+		}
 
 		return $items;
+	}
+
+	#[Route(path: '/api/part_categories/partCounts', methods: ['GET'], priority: 100)]
+	public function categoryPartCountsAction(Request $request): JsonResponse
+	{
+		$project = $request->query->getString('project');
+		$qb = $this->entityManager->createQueryBuilder()
+			->select('IDENTITY(p.category) AS categoryId, COUNT(DISTINCT p.id) AS partCount')
+			->from(Part::class, 'p')
+			->groupBy('p.category');
+		if ($project !== '') {
+			if (!ctype_digit($project) || (int)$project < 1) {
+				throw new BadRequestHttpException('Invalid project ID');
+			}
+			if ($this->entityManager->find(Project::class, (int)$project) === null) {
+				throw $this->createNotFoundException('Project not found');
+			}
+			$qb->join('p.projectParts', 'pp')
+				->andWhere('IDENTITY(pp.project) = :projectId')
+				->setParameter('projectId', (int)$project);
+		}
+		$counts = [];
+		foreach ($qb->getQuery()->getArrayResult() as $row) {
+			$counts[(int)$row['categoryId']] = (int)$row['partCount'];
+		}
+		return $this->json($counts);
+	}
+
+	#[Route(path: '/api/parts/project-contexts', methods: ['GET'], priority: 100)]
+	public function projectContextsAction(): JsonResponse
+	{
+		return $this->json($this->entityManager->createQueryBuilder()
+			->select('p.id, p.name')
+			->from(Project::class, 'p')
+			->orderBy('p.name', 'ASC')
+			->getQuery()->getArrayResult());
+	}
+
+	#[Route(path: '/api/parts/{id}/project-memberships/{projectId}', methods: ['PUT', 'DELETE'], priority: 100)]
+	public function projectMembershipAction(Request $request, int $id, int $projectId): JsonResponse
+	{
+		$part = $this->entityManager->find(Part::class, $id);
+		$project = $this->entityManager->find(Project::class, $projectId);
+		if ($part === null || $project === null) {
+			throw $this->createNotFoundException('Part or project not found');
+		}
+		$rows = $this->entityManager->getRepository(ProjectPart::class)->findBy(['part' => $part, 'project' => $project]);
+		if ($request->isMethod('PUT') && $rows === []) {
+			$this->entityManager->persist((new ProjectPart)
+				->setPart($part)
+				->setProject($project)
+				->setQuantity(1));
+		} elseif ($request->isMethod('DELETE')) {
+			foreach ($rows as $row) {
+				$this->entityManager->remove($row);
+			}
+		}
+		$this->entityManager->flush();
+		return $this->json(['partId' => $id, 'projectId' => $projectId, 'included' => $request->isMethod('PUT')]);
+	}
+
+	/** Fetch all supplier identifiers for one list page in a single query. */
+	private function attachDistributorNumbers(array $parts): void
+	{
+		$byId = [];
+		foreach ($parts as $part) {
+			if ($part->getId() !== null) {
+				$byId[$part->getId()] = $part;
+			}
+		}
+		if ($byId === []) {
+			return;
+		}
+		$numbers = [];
+		$rows = $this->entityManager->createQueryBuilder()
+			->select('pd', 'd', 'IDENTITY(pd.part) AS partId')
+			->from(PartDistributor::class, 'pd')
+			->join('pd.distributor', 'd')
+			->where('IDENTITY(pd.part) IN (:ids)')
+			->setParameter('ids', array_keys($byId))
+			->orderBy('pd.id', 'ASC')
+			->getQuery()->getResult();
+		foreach ($rows as $row) {
+			/** @var PartDistributor $pd */
+			$pd = $row[0];
+			$key = '/api/distributors/' . $pd->getDistributor()->getId();
+			$current = $numbers[$row['partId']][$key] ?? ['sku' => null, 'orderNumber' => null];
+			$numbers[$row['partId']][$key] = [
+				'sku' => $current['sku'] ?: $pd->getSku(),
+				'orderNumber' => $current['orderNumber'] ?: $pd->getOrderNumber()
+			];
+		}
+		foreach ($byId as $id => $part) {
+			$part->setDistributorNumbers($numbers[$id] ?? []);
+		}
 	}
 
 	/**

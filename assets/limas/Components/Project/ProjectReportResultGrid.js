@@ -346,7 +346,6 @@ Ext.define('Limas.Components.Project.ProjectReportResultGrid', {
 			for (let i = 0; i < partDistributors.count(); i++) {
 				if (partDistributors.getAt(i).getDistributor().getId() === context.record.getDistributor().getId()) {
 					let pd = partDistributors.getAt(i);
-					context.record.set('itemPrice', pd.get('price'));
 					context.record.set('distributorOrderNumber', pd.get('orderNumber'));
 					this.applyOrderSizing(context.record, pd);
 					context.record.set('itemSum', context.record.get('quantity') * context.record.get('itemPrice'));
@@ -362,11 +361,37 @@ Ext.define('Limas.Components.Project.ProjectReportResultGrid', {
 	 */
 	applyOrderSizing: function (record, partDistributor) {
 		let needed = Math.max(0, parseInt(record.get('missing'), 10) || 0);
-		let price = parseFloat(record.get('itemPrice')) || 0;
-		let packagingUnit = parseInt(partDistributor.get('packagingUnit'), 10) || 1;
-		let orderAmount = needed > 0 ? Math.ceil(needed / packagingUnit) * packagingUnit : 0;
+		let orderAmount = this.getOrderAmount(partDistributor, needed);
+		let price = this.getUnitPriceForQuantity(partDistributor, Math.max(1, orderAmount));
+		record.set('itemPrice', price || 0);
 		record.set('orderAmount', orderAmount);
-		record.set('orderSum', orderAmount * price);
+		record.set('orderSum', orderAmount * (price || 0));
+	},
+	getOrderAmount: function (partDistributor, needed) {
+		if (needed <= 0) return 0;
+		let packagingUnit = Math.max(1, parseInt(partDistributor.get('packagingUnit'), 10) || 1);
+		let breaks = partDistributor.get('priceBreaks') || [];
+		let minimum = Infinity;
+		breaks.forEach(function (entry) {
+			let quantity = parseInt(entry.quantity, 10);
+			if (quantity > 0 && quantity < minimum) minimum = quantity;
+		});
+		if (!isFinite(minimum)) minimum = 1;
+		return Math.ceil(Math.max(needed, minimum) / packagingUnit) * packagingUnit;
+	},
+	getUnitPriceForQuantity: function (partDistributor, quantity) {
+		let selectedQuantity = 0;
+		let price = parseFloat(partDistributor.get('price')) || 0;
+		(partDistributor.get('priceBreaks') || []).forEach(function (entry) {
+			let threshold = parseInt(entry.quantity, 10);
+			let tierPrice = parseFloat(entry.price);
+			if (threshold > 0 && threshold <= quantity && threshold >= selectedQuantity
+				&& isFinite(tierPrice) && tierPrice >= 0) {
+				selectedQuantity = threshold;
+				price = tierPrice;
+			}
+		});
+		return price;
 	},
 	onAutoFillClick: function () {
 		let partCount = this.getStore().getCount(),
@@ -407,7 +432,6 @@ Ext.define('Limas.Components.Project.ProjectReportResultGrid', {
 		if (cheapestDistributor !== null) {
 			projectPart.setDistributor(cheapestDistributor.getDistributor());
 			projectPart.set('distributorOrderNumber', cheapestDistributor.get('orderNumber'));
-			projectPart.set('itemPrice', cheapestDistributor.get('price'));
 			this.applyOrderSizing(projectPart, cheapestDistributor);
 			projectPart.set('itemSum', projectPart.get('quantity') * projectPart.get('itemPrice'));
 		}
@@ -434,13 +458,9 @@ Ext.define('Limas.Components.Project.ProjectReportResultGrid', {
 				continue;
 			}
 
-			let price = parseFloat(activeDistributor.get('price'));
-			if (price === 0 || isNaN(price)) {
-				continue;
-			}
-
-			let packagingUnit = parseInt(activeDistributor.get('packagingUnit'), 10) || 1;
-			let unitsToBuy = Math.ceil(needed / packagingUnit) * packagingUnit;
+			let unitsToBuy = this.getOrderAmount(activeDistributor, needed);
+			let price = this.getUnitPriceForQuantity(activeDistributor, unitsToBuy);
+			if (!(price > 0)) continue;
 			let cost = unitsToBuy * price;
 
 			if (firstPositive || cost < lowestCost) {

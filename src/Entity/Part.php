@@ -204,6 +204,14 @@ class Part
 	#[VirtualField(type: 'auto')]
 	#[Groups(['readonly'])]
 	private array $paramValues = [];
+	/** @var array<string, array{sku: ?string, orderNumber: ?string}> */
+	#[VirtualField(type: 'auto')]
+	#[Groups(['readonly'])]
+	private array $distributorNumbers = [];
+	/** @var list<int> */
+	#[VirtualField(type: 'auto')]
+	#[Groups(['readonly'])]
+	private array $projectIds = [];
 	/**
 	 * Flat category path, surfaced as an ExtJS model field so the parts grid
 	 * can group rows by category client-side. The grid's groupField needs a
@@ -270,6 +278,32 @@ class Part
 	public function setParamValues(array $paramValues): self
 	{
 		$this->paramValues = $paramValues;
+		return $this;
+	}
+
+	/** @return array<string, array{sku: ?string, orderNumber: ?string}> */
+	public function getDistributorNumbers(): array
+	{
+		return $this->distributorNumbers;
+	}
+
+	/** @param array<string, array{sku: ?string, orderNumber: ?string}> $numbers */
+	public function setDistributorNumbers(array $numbers): self
+	{
+		$this->distributorNumbers = $numbers;
+		return $this;
+	}
+
+	/** @return list<int> */
+	public function getProjectIds(): array
+	{
+		return $this->projectIds;
+	}
+
+	/** @param list<int> $projectIds */
+	public function setProjectIds(array $projectIds): self
+	{
+		$this->projectIds = $projectIds;
 		return $this;
 	}
 

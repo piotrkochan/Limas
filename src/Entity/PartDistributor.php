@@ -51,6 +51,10 @@ class PartDistributor
 	#[ORM\Column(type: Types::STRING, nullable: true)]
 	#[Groups(['default'])]
 	private ?string $sku;
+	/** @var list<array{quantity: int, price: string}>|null */
+	#[ORM\Column(type: Types::JSON, nullable: true)]
+	#[Groups(['default'])]
+	private ?array $priceBreaks = null;
 	#[ORM\Column(type: Types::BOOLEAN, nullable: true)]
 	#[Groups(['default'])]
 	private ?bool $ignoreForReports = false;
@@ -144,6 +148,29 @@ class PartDistributor
 	public function setSku(?string $sku): self
 	{
 		$this->sku = $sku;
+		return $this;
+	}
+
+	/** @return list<array{quantity: int, price: string}> */
+	public function getPriceBreaks(): array
+	{
+		return $this->priceBreaks ?? [];
+	}
+
+	/** @param list<array{quantity: int|string, price: int|float|string}>|null $breaks */
+	public function setPriceBreaks(?array $breaks): self
+	{
+		$normalized = [];
+		foreach ($breaks ?? [] as $break) {
+			$quantity = filter_var($break['quantity'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+			$price = $break['price'] ?? null;
+			if (!is_int($quantity) || !is_numeric($price) || !is_finite((float)$price) || (float)$price < 0) {
+				throw new \InvalidArgumentException('Price breaks require a positive quantity and non-negative price');
+			}
+			$normalized[$quantity] = ['quantity' => $quantity, 'price' => sprintf('%.8f', (float)$price)];
+		}
+		ksort($normalized, SORT_NUMERIC);
+		$this->priceBreaks = array_values($normalized);
 		return $this;
 	}
 

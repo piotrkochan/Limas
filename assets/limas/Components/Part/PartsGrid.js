@@ -190,6 +190,49 @@ Ext.define('Limas.PartsGrid', {
 
 		this.topToolbar.insert(1, this.createMetaPartButton);
 
+		this.selectedDistributorField = this.readCatalogPreference('field', 'sku');
+		if (this.selectedDistributorField !== 'sku' && this.selectedDistributorField !== 'orderNumber') {
+			this.selectedDistributorField = 'sku';
+		}
+		this.selectedDistributorId = null;
+		let distributorStore = Ext.data.StoreManager.lookup('DistributorStore');
+		this.catalogDistributor = Ext.create('Ext.form.field.ComboBox', {
+			fieldLabel: i18n('Distributor'), labelWidth: 75, width: 245,
+			store: distributorStore, displayField: 'name', valueField: '@id',
+			queryMode: 'local', forceSelection: true, editable: false,
+			listeners: {
+				change: function (field, value) {
+					this.selectedDistributorId = value;
+					let distributor = distributorStore.findRecord('@id', value, 0, false, true, true);
+					this.selectedDistributorName = distributor
+						? String(distributor.get('name')).toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+					if (value) this.writeCatalogPreference('distributor', value);
+					this.getView().refresh();
+				}, scope: this
+			}
+		});
+		this.catalogField = Ext.create('Ext.form.field.ComboBox', {
+			fieldLabel: i18n('Field'), labelWidth: 35, width: 160,
+			store: Ext.create('Ext.data.Store', {
+				fields: ['key', 'label'],
+				data: [{key: 'sku', label: 'SKU'}, {key: 'orderNumber', label: i18n('Order Number')}]
+			}),
+			displayField: 'label', valueField: 'key', queryMode: 'local',
+			forceSelection: true, editable: false, value: this.selectedDistributorField,
+			listeners: {
+				change: function (field, value) {
+					this.selectedDistributorField = value;
+					this.writeCatalogPreference('field', value);
+					this.getView().refresh();
+				}, scope: this
+			}
+		});
+		let searchIndex = this.topToolbar.items.indexOf(this.searchField);
+		this.topToolbar.insert(searchIndex, this.catalogDistributor);
+		this.topToolbar.insert(searchIndex + 1, this.catalogField);
+		distributorStore.on('load', this.selectCatalogDistributor, this);
+		this.selectCatalogDistributor();
+
 		// Bulk actions menu — enabled only when grid selection > 0 (the
 		// button wires its own selectionchange listener). First action:
 		// Move to storage location (PK #1193/#664).
@@ -221,7 +264,38 @@ Ext.define('Limas.PartsGrid', {
 		// reconfigure (preset / column add / remove) so the request matches
 		// the current column set.
 		this.store.on('beforeload', this._injectIncludeParameters, this);
+		this._enableDistributorNumbers();
 		this.on('reconfigure', this._refreshIncludeParameters, this);
+	},
+	readCatalogPreference: function (key, fallback) {
+		try { return window.localStorage.getItem('limas.parts.catalog.' + key) || fallback; }
+		catch (e) { return fallback; }
+	},
+	writeCatalogPreference: function (key, value) {
+		try { window.localStorage.setItem('limas.parts.catalog.' + key, value); }
+		catch (e) { /* Storage can be disabled in private browsing. */ }
+	},
+	selectCatalogDistributor: function () {
+		let store = Ext.data.StoreManager.lookup('DistributorStore');
+		if (!store || store.getCount() === 0) return;
+		let preferred = this.readCatalogPreference('distributor', null);
+		let selected = null;
+		store.each(function (record) {
+			if (record.get('@id') === preferred) selected = record;
+		});
+		if (!selected) {
+			store.each(function (record) {
+				if (String(record.get('name')).toLowerCase() === 'lcsc') selected = record;
+			});
+		}
+		this.catalogDistributor.setValue((selected || store.getAt(0)).get('@id'));
+	},
+	_enableDistributorNumbers: function () {
+		let proxy = this.store.getProxy();
+		if (proxy) {
+			proxy.extraParams = proxy.extraParams || {};
+			proxy.extraParams.includeDistributorNumbers = 1;
+		}
 	},
 
 	_collectIncludeParameters: function () {
@@ -253,6 +327,7 @@ Ext.define('Limas.PartsGrid', {
 	},
 
 	_refreshIncludeParameters: function () {
+		this._enableDistributorNumbers();
 		this._injectIncludeParameters();
 		this.store.load();
 	},
@@ -321,6 +396,7 @@ Ext.define('Limas.PartsGrid', {
 		Limas.printLabelSheet({parts: ids});
 	},
 	defineColumns: function () {
+		let grid = this;
 		this.columns = [
 			{
 				header: '<span class="web-icon fugue-icon paper-clip"></span>',
@@ -362,6 +438,24 @@ Ext.define('Limas.PartsGrid', {
 				dataIndex: 'description',
 				flex: 2,
 				minWidth: 150
+			}, {
+				header: i18n('Distributor number'),
+				dataIndex: 'distributorNumbers',
+				minWidth: 130,
+				flex: 1,
+				sortable: false,
+				renderer: function (value) {
+					let identifiers = value && value[grid.selectedDistributorId];
+					let number = identifiers && identifiers[grid.selectedDistributorField];
+					if (!number) return '';
+					let source = grid.selectedDistributorName || '';
+					let hasSprite = Ext.Array.contains(
+						['avnet', 'mouser', 'digikey', 'element14', 'farnell', 'lcsc', 'newark', 'oemsecrets', 'rs', 'tme'], source);
+					let icon = hasSprite
+						? '<i class="distributor-icon ' + source + '" style="margin-right:6px;"></i>'
+						: '<i class="web-icon lorry" style="margin-right:6px;"></i>';
+					return icon + Ext.htmlEncode(String(number));
+				}
 			}, {
 				header: i18n('Storage Location'),
 				dataIndex: 'storageLocation.name'

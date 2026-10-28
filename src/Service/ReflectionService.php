@@ -109,7 +109,8 @@ readonly class ReflectionService
 			Types::DATETIME_MUTABLE, Types::DATETIME_IMMUTABLE => 'date',
 			Types::FLOAT => 'number',
 			/*Types::ARRAY, */ Types::BOOLEAN, Types::DECIMAL, Types::STRING => $type,
-			Types::JSON => $rp ?? 'undefined', // array | object
+			// ExtJS has no "array" field type; "auto" preserves JSON arrays.
+			Types::JSON => $rp === 'array' ? 'auto' : ($rp ?? 'undefined'),
 			default => 'undefined',
 		};
 	}

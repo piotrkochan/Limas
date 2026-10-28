@@ -31,6 +31,12 @@ Ext.define('Limas.PartDistributorGrid', {
 			iconCls: 'web-icon lorry_delete',
 			handler: this.onDeleteClick
 		});
+		this.priceBreakButton = Ext.create('Ext.button.Button', {
+			text: i18n('Price breaks'),
+			disabled: true,
+			scope: this,
+			handler: this.onPriceBreakClick
+		});
 
 		this.dockedItems = [
 			{
@@ -41,7 +47,7 @@ Ext.define('Limas.PartDistributorGrid', {
 						scope: this,
 						iconCls: 'web-icon lorry_add',
 						handler: this.onAddClick
-					}, this.deleteButton
+				}, this.deleteButton, this.priceBreakButton
 				]
 			}
 		];
@@ -84,12 +90,25 @@ Ext.define('Limas.PartDistributorGrid', {
 				header: i18n('Price per Item'),
 				dataIndex: 'price',
 				flex: 1,
+				tooltip: i18n('Base price; quantity price breaks take precedence in BOM calculations'),
 				renderer: function (val, m, rec) {
 					return Limas.getApplication().formatCurrency(val, rec.get('currency'));
 				},
 				editor: {
 					xtype: 'CurrencyField',
 					allowBlank: false
+				}
+			}, {
+				header: i18n('Price breaks'),
+				dataIndex: 'priceBreaks',
+				flex: 2,
+				sortable: false,
+				renderer: function (value, metadata, record) {
+					if (!Ext.isArray(value) || value.length === 0) return '';
+					let currency = record.get('currency') || '';
+					return Ext.Array.map(value, function (entry) {
+						return Ext.htmlEncode(String(entry.quantity) + '+: ' + String(entry.price) + ' ' + currency);
+					}).join('; ');
 				}
 			}, {
 				header: i18n('Currency'),
@@ -173,6 +192,75 @@ Ext.define('Limas.PartDistributorGrid', {
 	},
 	onSelectChange: function (selModel, selections) {
 		this.deleteButton.setDisabled(selections.length === 0);
+		this.priceBreakButton.setDisabled(selections.length !== 1);
+	},
+	onPriceBreakClick: function () {
+		let selected = this.getSelectionModel().getSelection();
+		if (selected.length !== 1) return;
+		let partDistributor = selected[0];
+		let store = Ext.create('Ext.data.Store', {
+			fields: ['quantity', 'price'],
+			data: Ext.Array.map(partDistributor.get('priceBreaks') || [], function (entry) {
+				return {quantity: entry.quantity, price: entry.price};
+			})
+		});
+		let editing = Ext.create('Ext.grid.plugin.RowEditing', {clicksToEdit: 2});
+		let grid = Ext.create('Ext.grid.Panel', {
+			store: store,
+			plugins: [editing],
+			columns: [{
+				text: i18n('From quantity'), dataIndex: 'quantity', flex: 1,
+				editor: {xtype: 'numberfield', allowDecimals: false, minValue: 1, allowBlank: false}
+			}, {
+				text: i18n('Unit price'), dataIndex: 'price', flex: 1,
+				editor: {xtype: 'numberfield', minValue: 0, decimalPrecision: 8, allowBlank: false}
+			}],
+			tbar: [{
+				text: i18n('Add'),
+				handler: function () {
+					let row = store.add({quantity: 1, price: 0})[0];
+					editing.startEdit(row, 0);
+				}
+			}, {
+				text: i18n('Delete'),
+				handler: function () { store.remove(grid.getSelectionModel().getSelection()); }
+			}]
+		});
+		let window = Ext.create('Ext.window.Window', {
+			title: i18n('Price breaks'),
+			width: 480,
+			height: 340,
+			layout: 'fit',
+			modal: true,
+			items: [grid],
+			buttons: [{
+				text: i18n('Save'),
+				handler: function () {
+					if (editing.editing && editing.completeEdit() === false) return;
+					let breaks = [], quantities = {};
+					store.each(function (row) {
+						let quantity = Number(row.get('quantity'));
+						let price = Number(row.get('price'));
+						if (!Number.isInteger(quantity) || quantity < 1 || !Number.isFinite(price) || price < 0
+							|| quantities[quantity]) {
+							breaks = null;
+							return false;
+						}
+						quantities[quantity] = true;
+						breaks.push({quantity: quantity, price: price});
+					});
+					if (breaks === null) {
+						Ext.Msg.alert(i18n('Price breaks'), i18n('Use unique positive quantities and non-negative prices.'));
+						return;
+					}
+					breaks.sort(function (a, b) { return a.quantity - b.quantity; });
+					partDistributor.set('priceBreaks', breaks);
+					if (breaks.length) partDistributor.set('price', breaks[0].price);
+					window.close();
+				}
+			}, {text: i18n('Cancel'), handler: function () { window.close(); }}]
+		});
+		window.show();
 	},
 	isOptional: function (field) {
 		let fields = Limas.getApplication().getSystemPreference('limas.partDistributor.requiredFields', []);
