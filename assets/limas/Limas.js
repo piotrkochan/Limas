@@ -2,6 +2,33 @@ Ext.namespace('Limas');
 
 Limas.application = null;
 
+// Only menu panels are routable. Actions and editor windows have their own
+// lifecycle and must not be instantiated from a browser URL.
+Limas.routeViews = {
+	projects: 'Limas.ProjectEditorComponent',
+	footprints: 'Limas.FootprintEditorComponent',
+	manufacturers: 'Limas.ManufacturerEditorComponent',
+	storage: 'Limas.StorageLocationEditorComponent',
+	distributors: 'Limas.DistributorEditorComponent',
+	users: 'Limas.UserEditorComponent',
+	units: 'Limas.PartMeasurementUnitEditorComponent',
+	'unit-definitions': 'Limas.UnitEditorComponent',
+	'parameter-aliases': 'Limas.ParameterAliasEditorComponent',
+	'footprint-aliases': 'Limas.FootprintAliasEditorComponent',
+	'manufacturer-aliases': 'Limas.ManufacturerAliasEditorComponent',
+	'batch-jobs': 'Limas.BatchJobEditorComponent',
+	'user-preferences': 'Limas.Components.UserPreferences.Panel',
+	'system-preferences': 'Limas.Components.SystemPreferences.Panel',
+	'summary': 'Limas.SummaryStatisticsPanel',
+	'statistics': 'Limas.StatisticsChartPanel',
+	'system-information': 'Limas.SystemInformationGrid',
+	'project-reports': 'Limas.ProjectReportView',
+	'project-runs': 'Limas.ProjectRunEditorComponent',
+	'notices': 'Limas.SystemNoticeEditorComponent',
+	'stock-history': 'Limas.StockHistoryGrid',
+	'theme-tester': 'Limas.ThemeTester'
+};
+
 Ext.application({
 	name: 'Limas',
 	init: function () {
@@ -96,6 +123,7 @@ Ext.application({
 	 * Handles the login function. Initializes the part manager window, enables the menu bar and creates the stores+loads them.
 	 */
 	onLogin: function () {
+		this.routeRestoring = true;
 		this.createGlobalStores();
 
 		let reader = Ext.data.StoreManager.lookup('UserPreferenceStore').getProxy().getReader();
@@ -106,6 +134,12 @@ Ext.application({
 		let preferredTheme = this.getUserPreference('limas.user.theme', null);
 
 		this.createPartManager();
+		if (!this.routeListenersInstalled) {
+			this.centerPanel.on('tabchange', this.writeRoute, this);
+			window.addEventListener('hashchange', Ext.bind(this.onRouteHashChange, this));
+			this.routeListenersInstalled = true;
+		}
+		this.restoreRoute();
 
 		this.menuBar.enable();
 
@@ -141,6 +175,7 @@ Ext.application({
 		}
 	},
 	onLogout: function () {
+		this.routeRestoring = true;
 		this.menuBar.disable();
 		this.centerPanel.removeAll(true);
 		this.getStatusbar().setDisconnected();
@@ -155,9 +190,11 @@ Ext.application({
 	 * changed.
 	 */
 	recreatePartManager: function () {
+		this.routeRestoring = true;
 		this.centerPanel.remove(this.partManager);
 		this.getPartManager().destroy();
 		this.createPartManager();
+		this.restoreRoute();
 	},
 	/**
 	 * Creates the part manager. While this is usually only done after login, it can also happen when the user changes
@@ -172,6 +209,54 @@ Ext.application({
 		});
 
 		this.centerPanel.insert(0, this.partManager);
+	},
+	buildRoute: function () {
+		let active = this.centerPanel.getActiveTab();
+		if (!active || active === this.partManager) {
+			return '#/parts' + (this.partManager ? this.partManager.getRouteQuery() : '');
+		}
+		let name = active.$className;
+		for (let slug in Limas.routeViews) {
+			if (Limas.routeViews[slug] === name) return '#/' + slug;
+		}
+		return null;
+	},
+	writeRoute: function () {
+		if (this.routeRestoring || (this.partManager && this.partManager.routePending)) return;
+		let route = this.buildRoute();
+		if (route && window.location.hash !== route) {
+			this.lastWrittenRoute = route;
+			window.location.hash = route;
+		}
+	},
+	onRouteHashChange: function () {
+		if (window.location.hash === this.lastWrittenRoute) {
+			this.lastWrittenRoute = null;
+			return;
+		}
+		this.restoreRoute();
+	},
+	restoreRoute: function () {
+		if (!this.partManager) return;
+		let match = /^#\/([a-z-]+)(?:\?(.*))?$/.exec(window.location.hash);
+		if (!match) {
+			this.routeRestoring = false;
+			this.writeRoute();
+			return;
+		}
+		this.routeRestoring = true;
+		if (match[1] === 'parts') {
+			this.centerPanel.setActiveTab(this.partManager);
+			this.partManager.applyRouteQuery(new URLSearchParams(match[2] || ''));
+		} else if (Object.prototype.hasOwnProperty.call(Limas.routeViews, match[1])) {
+			this.openAppItem(Limas.routeViews[match[1]]);
+		} else {
+			this.centerPanel.setActiveTab(this.partManager);
+			this.routeRestoring = false;
+			this.writeRoute();
+			return;
+		}
+		this.routeRestoring = false;
 	},
 	/**
 	 * Sets the initial user preferences, which are applied into the userPreferenceStore after login

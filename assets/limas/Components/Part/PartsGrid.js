@@ -196,14 +196,17 @@ Ext.define('Limas.PartsGrid', {
 		}
 		this.selectedDistributorId = null;
 		let distributorStore = Ext.data.StoreManager.lookup('DistributorStore');
+		this.catalogDistributors = Ext.create('Ext.data.Store', {
+			fields: ['@id', 'name'], data: []
+		});
 		this.catalogDistributor = Ext.create('Ext.form.field.ComboBox', {
 			fieldLabel: i18n('Distributor'), labelWidth: 75, width: 245,
-			store: distributorStore, displayField: 'name', valueField: '@id',
+			store: this.catalogDistributors, displayField: 'name', valueField: '@id',
 			queryMode: 'local', forceSelection: true, editable: false,
 			listeners: {
 				change: function (field, value) {
 					this.selectedDistributorId = value;
-					let distributor = distributorStore.findRecord('@id', value, 0, false, true, true);
+					let distributor = this.catalogDistributors.findRecord('@id', value, 0, false, true, true);
 					this.selectedDistributorName = distributor
 						? String(distributor.get('name')).toLowerCase().replace(/[^a-z0-9]/g, '') : '';
 					if (value) this.writeCatalogPreference('distributor', value);
@@ -230,8 +233,9 @@ Ext.define('Limas.PartsGrid', {
 		let searchIndex = this.topToolbar.items.indexOf(this.searchField);
 		this.topToolbar.insert(searchIndex, this.catalogDistributor);
 		this.topToolbar.insert(searchIndex + 1, this.catalogField);
-		distributorStore.on('load', this.selectCatalogDistributor, this);
-		this.selectCatalogDistributor();
+		distributorStore.on('load', this.refreshCatalogDistributors, this);
+		this.store.on('load', this.refreshCatalogDistributors, this);
+		this.refreshCatalogDistributors();
 
 		// Bulk actions menu — enabled only when grid selection > 0 (the
 		// button wires its own selectionchange listener). First action:
@@ -275,20 +279,30 @@ Ext.define('Limas.PartsGrid', {
 		try { window.localStorage.setItem('limas.parts.catalog.' + key, value); }
 		catch (e) { /* Storage can be disabled in private browsing. */ }
 	},
-	selectCatalogDistributor: function () {
-		let store = Ext.data.StoreManager.lookup('DistributorStore');
-		if (!store || store.getCount() === 0) return;
-		let preferred = this.readCatalogPreference('distributor', null);
-		let selected = null;
-		store.each(function (record) {
-			if (record.get('@id') === preferred) selected = record;
+	refreshCatalogDistributors: function () {
+		let source = Ext.data.StoreManager.lookup('DistributorStore');
+		if (!source) return;
+		let used = {};
+		this.store.each(function (part) {
+			Ext.Object.each(part.get('distributorNumbers') || {}, function (id) {
+				used[id] = true;
+			});
 		});
+		let available = [];
+		source.each(function (distributor) {
+			let id = distributor.get('@id');
+			if (used[id]) available.push({'@id': id, name: distributor.get('name')});
+		});
+		this.catalogDistributors.loadData(available);
+		let preferred = this.readCatalogPreference('distributor', null);
+		let selected = this.catalogDistributors.findRecord('@id', this.selectedDistributorId, 0, false, true, true)
+			|| this.catalogDistributors.findRecord('@id', preferred, 0, false, true, true);
 		if (!selected) {
-			store.each(function (record) {
+			this.catalogDistributors.each(function (record) {
 				if (String(record.get('name')).toLowerCase() === 'lcsc') selected = record;
 			});
 		}
-		this.catalogDistributor.setValue((selected || store.getAt(0)).get('@id'));
+		this.catalogDistributor.setValue((selected || this.catalogDistributors.getAt(0))?.get('@id') || null);
 	},
 	_enableDistributorNumbers: function () {
 		let proxy = this.store.getProxy();

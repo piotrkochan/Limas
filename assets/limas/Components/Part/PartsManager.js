@@ -61,6 +61,7 @@ Ext.define('Limas.PartManager', {
 		// Create the tree
 		this.tree = Ext.create('Limas.PartCategoryTree', treeConfig);
 		this.tree.getStore().on('load', this.refreshCategoryCounts, this);
+		this.tree.getStore().on('load', this.applyPendingRoute, this);
 
 		// Trigger a grid reload on category change
 		this.tree.on('itemclick', this.onCategoryClick, this);
@@ -104,6 +105,7 @@ Ext.define('Limas.PartManager', {
 		this.grid.on('duplicateItemWithBasicData', this.onDuplicateItemWithBasicData, this);
 		this.grid.on('duplicateItemWithAllData', this.onDuplicateItemWithAllData, this);
 		this.grid.on('itemcontextmenu', this.onPartContextMenu, this);
+		this.store.on('load', function () { Limas.getApplication().writeRoute(); }, this);
 		this.tree.on('syncCategory', this.onSyncCategory, this);
 		this.tree.on('partCategoryChanged', this.refreshCategoryCounts, this);
 
@@ -308,16 +310,23 @@ Ext.define('Limas.PartManager', {
 						return {id: '/api/projects/' + project.id, name: project.name};
 					})
 				));
-				let preferred = this.activeProject;
-				if (!preferred) {
+				let preferred = this.pendingRoute
+					? this.pendingRoute.project : this.activeProject;
+				if (!preferred && !this.pendingRoute) {
 					try { preferred = window.localStorage.getItem('limas.partmanager.project') || ''; }
 					catch (error) { preferred = ''; }
 				}
 				if (preferred && !this.projectChoices.findRecord('id', preferred, 0, false, true, true)) preferred = '';
 				this.projectSelector.setValue(preferred);
+				this.applyPendingRoute();
 				if (callback) callback();
 			},
-			failure: function () { if (callback) callback(); }
+			failure: function () {
+				this.pendingRoute = null;
+				this.routePending = false;
+				Limas.getApplication().writeRoute();
+				if (callback) callback();
+			}
 		});
 	},
 	onProjectContextChange: function (selector, projectIri) {
@@ -340,6 +349,70 @@ Ext.define('Limas.PartManager', {
 		}
 		filters.endUpdate();
 		this.refreshCategoryCounts();
+		Limas.getApplication().writeRoute();
+	},
+	getRouteQuery: function () {
+		let query = new URLSearchParams();
+		let project = String(this.activeProject || '').match(/^\/api\/projects\/(\d+)$/);
+		if (project) query.set('project', project[1]);
+		let category = this.selectedCategory && String(this.selectedCategory.get('@id') || '').match(/^\/api\/part_categories\/(\d+)$/);
+		if (category) query.set('category', category[1]);
+		let page = this.store.currentPage || 1;
+		if (page > 1) query.set('page', String(page));
+		let selection = this.grid.getSelectionModel().getSelection();
+		let part = selection.length === 1 && String(selection[0].get('@id') || '').match(/^\/api\/parts\/(\d+)$/);
+		if (part) query.set('part', part[1]);
+		let result = query.toString();
+		return result ? '?' + result : '';
+	},
+	applyRouteQuery: function (query) {
+		let integer = function (name) {
+			let value = query.get(name) || '';
+			return /^[1-9]\d*$/.test(value) ? value : '';
+		};
+		this.pendingRoute = {
+			project: integer('project') ? '/api/projects/' + integer('project') : '',
+			category: integer('category'),
+			part: integer('part'),
+			page: Math.min(Number(integer('page') || 1), 100000)
+		};
+		this.routePending = true;
+		this.applyPendingRoute();
+	},
+	applyPendingRoute: function () {
+		if (!this.pendingRoute || !this.projectsLoaded || !this.tree.getStore().isLoaded()) return;
+		let route = this.pendingRoute;
+		this.pendingRoute = null;
+		this.activeRouteRequest = route;
+		let project = route.project && this.projectChoices.findRecord('id', route.project, 0, false, true, true)
+			? route.project : '';
+		this.projectSelector.setValue(project);
+		let node = route.category
+			? this.tree.getRootNode().findChild('@id', '/api/part_categories/' + route.category, true) : null;
+		if (node) {
+			this.tree.getSelectionModel().select(node);
+			this.tree.getView().ensureVisible(node);
+			this.onCategoryClick(this.tree, node);
+		} else {
+			if (this.categoryFilter) this.store.removeFilter(this.categoryFilter);
+			this.categoryFilter = null;
+			this.selectedCategory = null;
+			this.tree.getSelectionModel().deselectAll();
+		}
+		this.store.loadPage(route.page, {
+			scope: this,
+			callback: function (records) {
+				if (this.activeRouteRequest !== route) return;
+				if (route.part) {
+					let part = (records || []).find(function (record) {
+						return record.get('@id') === '/api/parts/' + route.part;
+					});
+					if (part) this.grid.getSelectionModel().select(part);
+				}
+				this.routePending = false;
+				Limas.getApplication().writeRoute();
+			}
+		});
 	},
 	refreshCategoryCounts: function () {
 		let projectIri = this.activeProject;
@@ -452,6 +525,7 @@ Ext.define('Limas.PartManager', {
 			operator: 'IN',
 			value: this.getChildrenIds(record)
 		});
+		this.categoryFilter = filter;
 
 		if (record.get('description') && record.get('description').trim() !== '') {
 			this.grid.setNotification(record.get('description'));
@@ -466,6 +540,7 @@ Ext.define('Limas.PartManager', {
 		} else {
 			this.store.addFilter(filter);
 		}
+		Limas.getApplication().writeRoute();
 	},
 	getSelectedCategory: function () {
 		return this.selectedCategory;
@@ -691,6 +766,7 @@ Ext.define('Limas.PartManager', {
 				this.tree.syncButton.disable();
 			}
 		}
+		Limas.getApplication().writeRoute();
 	},
 	/**
 	 * Triggers loading of a part

@@ -17,6 +17,7 @@ const Ext = {
     contains: (items, value) => items.includes(value),
     each: (items, callback, scope) => items.forEach(item => callback.call(scope, item))
   },
+  Object: {each: (object, callback) => Object.entries(object).forEach(([key, value]) => callback(key, value))},
   data: {StoreManager: {lookup: () => distributorStore}},
   htmlEncode: value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;')
 };
@@ -46,6 +47,25 @@ assert.match(cell, /target="_blank"/);
 const missingCode = {get: () => ({})};
 assert.equal(grid.getLcscProductUrl(missingCode), null);
 assert.equal(column.renderer('[object Object]', {}, missingCode), '');
+
+const choices = [];
+grid.store = {each: callback => [part].forEach(callback)};
+grid.catalogDistributors = {
+  loadData: data => { choices.splice(0, choices.length, ...data.map(item => ({get: key => item[key]}))); },
+  findRecord: (field, value) => choices.find(item => item.get(field) === value),
+  each: callback => choices.forEach(callback),
+  getAt: index => choices[index]
+};
+grid.catalogDistributor = {setValue: value => { grid.selectedDistributorId = value; }};
+grid.readCatalogPreference = () => null;
+gridClass.refreshCatalogDistributors.call(grid);
+assert.deepEqual(choices.map(item => item.get('name')), ['LCSC']);
+grid.store = {each: callback => [missingCode].forEach(callback)};
+gridClass.refreshCatalogDistributors.call(grid);
+assert.equal(choices.length, 0);
+assert.equal(grid.selectedDistributorId, null);
+grid.store = {each: callback => [part].forEach(callback)};
+gridClass.refreshCatalogDistributors.call(grid);
 
 let store;
 Ext.create = (name, config) => {

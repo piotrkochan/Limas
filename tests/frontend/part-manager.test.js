@@ -9,7 +9,7 @@ class FilterPlugin {
   isEnabled() { return this.enabled; }
   getFilter() { throw new Error('A disabled filter must not be rebuilt'); }
 }
-const Limas = {Util: {FilterPlugin}};
+const Limas = {Util: {FilterPlugin}, getApplication: () => ({writeRoute: () => {}})};
 const Ext = {
   define: (name, definition) => { classes[name] = definition; },
   Array: {each: (items, callback) => items.forEach(callback)},
@@ -18,7 +18,7 @@ const Ext = {
 };
 for (const filename of ['PartCategoryTree.js', 'PartsManager.js', 'PartFilterPanel.js']) {
   const file = path.join(__dirname, '../../assets/limas/Components/Part', filename);
-  vm.runInNewContext(fs.readFileSync(file, 'utf8'), {Ext, Limas, i18n: text => text}, {filename: file});
+  vm.runInNewContext(fs.readFileSync(file, 'utf8'), {Ext, Limas, URLSearchParams, i18n: text => text}, {filename: file});
 }
 
 function node(id, children = []) {
@@ -92,5 +92,43 @@ const enabledFilter = new FilterPlugin(true, {id: 'categoryFilter'});
 filterPanel.filterControls = [{findPlugin: () => enabledFilter, disableFilter: () => { disabledCalls++; }}];
 classes['Limas.PartFilterPanel']._onFilterRemove.call(filterPanel);
 assert.equal(disabledCalls, 1);
+
+const routeContext = {
+  activeProject: '/api/projects/78',
+  selectedCategory: {get: key => key === '@id' ? '/api/part_categories/123' : null},
+  store: {currentPage: 2},
+  grid: {getSelectionModel: () => ({getSelection: () => [{get: () => '/api/parts/456'}]})}
+};
+assert.equal(manager.getRouteQuery.call(routeContext), '?project=78&category=123&page=2&part=456');
+
+let selectedPart;
+let selectedCategory;
+let requestedPage;
+const category = {get: () => '/api/part_categories/123'};
+const part = {get: () => '/api/parts/456'};
+const restoreContext = {
+  projectsLoaded: true,
+  projectChoices: {findRecord: () => true},
+  projectSelector: {setValue: value => { restoreContext.project = value; }},
+  tree: {
+    getStore: () => ({isLoaded: () => true}),
+    getRootNode: () => ({findChild: () => category}),
+    getSelectionModel: () => ({select: node => { selectedCategory = node; }}),
+    getView: () => ({ensureVisible: () => {}})
+  },
+  store: {loadPage: (page, options) => {
+    requestedPage = page;
+    options.callback.call(options.scope, [part]);
+  }},
+  grid: {getSelectionModel: () => ({select: record => { selectedPart = record; }})},
+  onCategoryClick: () => {},
+  applyPendingRoute() { manager.applyPendingRoute.call(this); }
+};
+manager.applyRouteQuery.call(restoreContext, new URLSearchParams('project=78&category=123&page=2&part=456'));
+assert.equal(restoreContext.project, '/api/projects/78');
+assert.equal(selectedCategory, category);
+assert.equal(requestedPage, 2);
+assert.equal(selectedPart, part);
+assert.equal(restoreContext.routePending, false);
 
 console.log('Part Manager category counts and project context passed');
