@@ -22,6 +22,8 @@ Ext.define('Limas.PartManager', {
 	compactLayout: false,
 
 	selectedCategory: null,
+	activeProject: '',
+	projectsLoaded: false,
 
 	initComponent: function () {
 		/**
@@ -58,6 +60,7 @@ Ext.define('Limas.PartManager', {
 
 		// Create the tree
 		this.tree = Ext.create('Limas.PartCategoryTree', treeConfig);
+		this.tree.getStore().on('load', this.refreshCategoryCounts, this);
 
 		// Trigger a grid reload on category change
 		this.tree.on('itemclick', this.onCategoryClick, this);
@@ -100,7 +103,9 @@ Ext.define('Limas.PartManager', {
 		this.grid.on('addMetaPart', this.onAddMetaPart, this);
 		this.grid.on('duplicateItemWithBasicData', this.onDuplicateItemWithBasicData, this);
 		this.grid.on('duplicateItemWithAllData', this.onDuplicateItemWithAllData, this);
+		this.grid.on('itemcontextmenu', this.onPartContextMenu, this);
 		this.tree.on('syncCategory', this.onSyncCategory, this);
+		this.tree.on('partCategoryChanged', this.refreshCategoryCounts, this);
 
 		// Create the stock level panel
 		this.stockLevel = Ext.create('Limas.PartStockHistory', {title: 'Stock History'});
@@ -262,7 +267,167 @@ Ext.define('Limas.PartManager', {
 			];
 		}
 
+		this.projectChoices = Ext.create('Ext.data.Store', {
+			fields: ['id', 'name'],
+			data: [{id: '', name: i18n('All parts')}]
+		});
+		this.projectSelector = Ext.create('Ext.form.field.ComboBox', {
+			fieldLabel: i18n('Project'),
+			labelWidth: 50,
+			width: 270,
+			store: this.projectChoices,
+			displayField: 'name',
+			valueField: 'id',
+			queryMode: 'local',
+			forceSelection: true,
+			editable: false,
+			value: '',
+			listeners: {change: this.onProjectContextChange, scope: this}
+		});
+		this.grid.topToolbar.insert(
+			this.grid.topToolbar.items.indexOf(this.grid.catalogDistributor),
+			this.projectSelector
+		);
 		this.callParent();
+		this.loadProjects();
+		this.on('activate', function () {
+			this.loadProjects();
+			this.refreshCategoryCounts();
+		}, this);
+	},
+	loadProjects: function (callback) {
+		Ext.Ajax.request({
+			url: '/api/parts/project-contexts',
+			scope: this,
+			success: function (response) {
+				let projects = Ext.decode(response.responseText);
+				this.projects = projects;
+				this.projectsLoaded = true;
+				this.projectChoices.loadData([{id: '', name: i18n('All parts')}].concat(
+					Ext.Array.map(projects, function (project) {
+						return {id: '/api/projects/' + project.id, name: project.name};
+					})
+				));
+				let preferred = this.activeProject;
+				if (!preferred) {
+					try { preferred = window.localStorage.getItem('limas.partmanager.project') || ''; }
+					catch (error) { preferred = ''; }
+				}
+				if (preferred && !this.projectChoices.findRecord('id', preferred, 0, false, true, true)) preferred = '';
+				this.projectSelector.setValue(preferred);
+				if (callback) callback();
+			},
+			failure: function () { if (callback) callback(); }
+		});
+	},
+	onProjectContextChange: function (selector, projectIri) {
+		if (!this.projectsLoaded || this.activeProject === projectIri) return;
+		this.activeProject = projectIri || '';
+		try { window.localStorage.setItem('limas.partmanager.project', this.activeProject); }
+		catch (error) { /* Private browsing may disable storage. */ }
+		let filters = this.store.getFilters();
+		filters.beginUpdate();
+		if (this.projectContextFilter) filters.remove(this.projectContextFilter);
+		this.projectContextFilter = null;
+		if (this.activeProject) {
+			this.projectContextFilter = Ext.create('Limas.util.Filter', {
+				id: 'projectContextFilter',
+				property: 'projectParts.project',
+				operator: '=',
+				value: this.activeProject
+			});
+			filters.add(this.projectContextFilter);
+		}
+		filters.endUpdate();
+		this.refreshCategoryCounts();
+	},
+	refreshCategoryCounts: function () {
+		let projectIri = this.activeProject;
+		let match = projectIri.match(/(\d+)$/);
+		Ext.Ajax.request({
+			url: '/api/part_categories/partCounts',
+			params: match ? {project: match[1]} : {},
+			scope: this,
+			success: function (response) {
+				if (this.activeProject === projectIri) this.tree.setPartCounts(Ext.decode(response.responseText));
+			}
+		});
+	},
+	onPartContextMenu: function (view, record, item, index, event) {
+		event.stopEvent();
+		this.grid.getSelectionModel().select(record);
+		let position = event.getXY();
+		if (this.projectsLoaded) {
+			this.showPartContextMenu(record, position);
+		} else {
+			this.loadProjects(Ext.bind(function () { this.showPartContextMenu(record, position); }, this));
+		}
+	},
+	showPartContextMenu: function (record, position) {
+		let menuItems = [{
+			text: i18n('Edit'), iconCls: 'web-icon brick_edit',
+			handler: Ext.bind(function () { this.onEditPart(record); }, this)
+		}, {
+			text: i18n('Add Stock'), iconCls: 'web-icon brick_add',
+			handler: Ext.bind(function () { this.changeStockFromMenu(record, true); }, this)
+		}, {
+			text: i18n('Remove Stock'), iconCls: 'web-icon brick_delete',
+			handler: Ext.bind(function () { this.changeStockFromMenu(record, false); }, this)
+		}, '-', {text: i18n('Projects'), disabled: true}];
+		Ext.Array.each(this.projects || [], function (project) {
+			menuItems.push(Ext.create('Ext.menu.CheckItem', {
+				text: Ext.htmlEncode(project.name),
+				checked: Ext.Array.contains(record.get('projectIds') || [], Number(project.id)),
+				hideOnClick: false,
+				checkHandler: function (item, checked) {
+					this.changeProjectMembership(record, project.id, item, checked);
+				},
+				scope: this
+			}));
+		}, this);
+		let menu = Ext.create('Ext.menu.Menu', {items: menuItems});
+		menu.on('hide', function () { menu.destroy(); });
+		menu.showAt(position);
+	},
+	changeProjectMembership: function (record, projectId, item, checked) {
+		let match = String(record.get('@id') || record.getId()).match(/(\d+)$/);
+		if (!match) { item.setChecked(!checked, true); return; }
+		item.setDisabled(true);
+		Ext.Ajax.request({
+			url: '/api/parts/' + match[1] + '/project-memberships/' + projectId,
+			method: checked ? 'PUT' : 'DELETE',
+			scope: this,
+			success: function () {
+				let ids = Ext.Array.from(record.get('projectIds') || []);
+				ids = Ext.Array.filter(ids, function (id) { return Number(id) !== Number(projectId); });
+				if (checked) ids.push(Number(projectId));
+				record.set('projectIds', ids);
+				record.commit();
+				if (!item.destroyed) item.setDisabled(false);
+				this.store.reload();
+				this.refreshCategoryCounts();
+			},
+			failure: function () {
+				if (!item.destroyed) {
+					item.setChecked(!checked, true);
+					item.setDisabled(false);
+				}
+				Ext.Msg.alert(i18n('Projects'), i18n('Could not update project membership.'));
+			}
+		});
+	},
+	changeStockFromMenu: function (record, add) {
+		let window = new Limas.PartStockWindow({partUnitName: record.get('partUnitName')});
+		let callback = function (quantity, price, comment) {
+			record.callPutAction(add ? 'addStock' : 'removeStock', add
+				? {quantity: quantity, price: price, comment: comment}
+				: {quantity: quantity, comment: comment}, Ext.bind(function () {
+					Ext.GlobalEvents.fireEvent('partStockChanged');
+					this.store.reload();
+				}, this), true);
+		};
+		if (add) window.addStock(callback, this);
+		else window.removeStock(callback, this);
 	},
 	/**
 	 * Applies the category filter to the store when a category is selected
@@ -434,7 +599,7 @@ Ext.define('Limas.PartManager', {
 		if (btn == 'yes') {
 			this.detailPanel.collapse();
 			this.detail.clear();
-			r.erase();
+			r.erase({success: this.refreshCategoryCounts, scope: this});
 		}
 	},
 	/**
@@ -483,9 +648,11 @@ Ext.define('Limas.PartManager', {
 	},
 	onNewPartSaved: function () {
 		this.grid.getStore().reload();
+		this.refreshCategoryCounts();
 	},
 	onPartSaved: function (record) {
 		this.detail.setValues(record);
+		this.refreshCategoryCounts();
 	},
 	/**
 	 * Called when a part was selected in the grid. Displays the details for this part.

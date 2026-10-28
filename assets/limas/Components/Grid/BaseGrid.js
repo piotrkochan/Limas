@@ -8,6 +8,7 @@ Ext.define('Limas.BaseGrid', {
 	renderers: [],
 
 	initComponent: function () {
+		this.viewConfig = Ext.applyIf(Ext.apply({}, this.viewConfig), {enableTextSelection: true});
 		this.defaultColumnConfiguration = this.columns;
 		this.callParent();
 	},
