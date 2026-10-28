@@ -297,6 +297,20 @@ Ext.define('Limas.PartsGrid', {
 			proxy.extraParams.includeDistributorNumbers = 1;
 		}
 	},
+	getLcscProductUrl: function (record) {
+		let distributors = Ext.data.StoreManager.lookup('DistributorStore');
+		let numbers = record.get('distributorNumbers') || {};
+		let code = null;
+		if (distributors) {
+			distributors.each(function (distributor) {
+				if (String(distributor.get('name')).toLowerCase() !== 'lcsc') return;
+				let entry = numbers[distributor.get('@id')];
+				if (entry) code = entry.sku || entry.orderNumber;
+			});
+		}
+		return /^C[1-9][0-9]*$/i.test(String(code || ''))
+			? 'https://www.lcsc.com/product-detail/' + String(code).toUpperCase() + '.html' : null;
+	},
 
 	_collectIncludeParameters: function () {
 		let names = [];
@@ -444,8 +458,11 @@ Ext.define('Limas.PartsGrid', {
 				minWidth: 130,
 				flex: 1,
 				sortable: false,
-				renderer: function (value) {
-					let identifiers = value && value[grid.selectedDistributorId];
+				renderer: function (value, metadata, record) {
+					// The column override HTML-encodes value before this renderer runs.
+					// Read the original map from the ExtJS record instead.
+					let numbers = record.get('distributorNumbers') || {};
+					let identifiers = numbers[grid.selectedDistributorId];
 					let number = identifiers && identifiers[grid.selectedDistributorField];
 					if (!number) return '';
 					let source = grid.selectedDistributorName || '';
@@ -454,7 +471,9 @@ Ext.define('Limas.PartsGrid', {
 					let icon = hasSprite
 						? '<i class="distributor-icon ' + source + '" style="margin-right:6px;"></i>'
 						: '<i class="web-icon lorry" style="margin-right:6px;"></i>';
-					return icon + Ext.htmlEncode(String(number));
+					let content = icon + Ext.htmlEncode(String(number));
+					let url = source === 'lcsc' ? grid.getLcscProductUrl(record) : null;
+					return url ? '<a href="' + Ext.htmlEncode(url) + '" target="_blank" rel="noopener noreferrer">' + content + '</a>' : content;
 				}
 			}, {
 				header: i18n('Storage Location'),

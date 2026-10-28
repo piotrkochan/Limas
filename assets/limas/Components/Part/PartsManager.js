@@ -365,6 +365,7 @@ Ext.define('Limas.PartManager', {
 		}
 	},
 	showPartContextMenu: function (record, position) {
+		let lcscUrl = this.grid.getLcscProductUrl(record);
 		let menuItems = [{
 			text: i18n('Edit'), iconCls: 'web-icon brick_edit',
 			handler: Ext.bind(function () { this.onEditPart(record); }, this)
@@ -374,6 +375,10 @@ Ext.define('Limas.PartManager', {
 		}, {
 			text: i18n('Remove Stock'), iconCls: 'web-icon brick_delete',
 			handler: Ext.bind(function () { this.changeStockFromMenu(record, false); }, this)
+		}, {
+			text: i18n('Open in LCSC'), iconCls: 'distributor-icon lcsc',
+			disabled: !lcscUrl,
+			handler: function () { window.open(lcscUrl, '_blank', 'noopener,noreferrer'); }
 		}, '-', {text: i18n('Projects'), disabled: true}];
 		Ext.Array.each(this.projects || [], function (project) {
 			menuItems.push(Ext.create('Ext.menu.CheckItem', {
@@ -387,7 +392,9 @@ Ext.define('Limas.PartManager', {
 			}));
 		}, this);
 		let menu = Ext.create('Ext.menu.Menu', {items: menuItems});
-		menu.on('hide', function () { menu.destroy(); });
+		// ExtJS hides a clicked menu before invoking the item's handler.
+		// Destroying it synchronously here cancels Edit and stock actions.
+		menu.on('hide', function () { Ext.defer(menu.destroy, 1, menu); });
 		menu.showAt(position);
 	},
 	changeProjectMembership: function (record, projectId, item, checked) {
@@ -698,7 +705,11 @@ Ext.define('Limas.PartManager', {
 		});
 	},
 	createStore: function (config) {
-		this.store = Ext.create('Limas.Data.Store.PartStore');
+		this.store = Ext.create('Limas.Data.Store.PartStore', {autoLoad: false});
+		let proxy = this.store.getProxy();
+		proxy.extraParams = proxy.extraParams || {};
+		proxy.extraParams.includeDistributorNumbers = 1;
+		this.store.load();
 	},
 	getStore: function () {
 		return this.store;
