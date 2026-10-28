@@ -6,10 +6,12 @@ use Doctrine\ORM\EntityManagerInterface;
 use Limas\Entity\BulkImportJob;
 use Limas\Entity\BulkImportJobItem;
 use Limas\Entity\PartCategory;
+use Limas\Entity\Project;
 use Limas\Entity\StorageLocation;
 use Limas\Entity\User;
 use Limas\Message\BulkImportJobMessage;
 use Limas\Service\Integration\InfoProvider\BulkImportCsvParser;
+use Limas\Service\Integration\InfoProvider\BulkImportProjectProcessor;
 use Limas\Service\Integration\InfoProvider\Enum\BulkImportDuplicatesBehavior;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -39,7 +41,8 @@ class BulkImportActions
 	public function __construct(
 		private readonly EntityManagerInterface $em,
 		private readonly BulkImportCsvParser    $csvParser,
-		private readonly MessageBusInterface    $messageBus
+		private readonly MessageBusInterface    $messageBus,
+		private readonly BulkImportProjectProcessor $projectProcessor
 	)
 	{
 	}
@@ -58,8 +61,26 @@ class BulkImportActions
 		}
 
 		$mapping = $meta['mapping'] ?? null;
-		if (!is_array($mapping) || !isset($mapping['mpn']) || !is_int($mapping['mpn'])) {
-			return new JsonResponse(['error' => '`mapping.mpn` (column index) is required'], 400);
+		if (!is_array($mapping) || (!isset($mapping['mpn']) && !isset($mapping['lcsc']))
+			|| (isset($mapping['mpn']) && !is_int($mapping['mpn']))
+			|| (isset($mapping['lcsc']) && !is_int($mapping['lcsc']))) {
+			return new JsonResponse(['error' => '`mapping.mpn` or `mapping.lcsc` (column index) is required'], 400);
+		}
+		$projectId = (int)($meta['projectId'] ?? 0);
+		$projectName = trim((string)($meta['projectName'] ?? ''));
+		if ($projectId > 0 && $projectName !== '') {
+			return new JsonResponse(['error' => 'Choose projectId or projectName, not both'], 400);
+		}
+		$project = $projectId > 0 ? $this->em->find(Project::class, $projectId) : null;
+		if ($projectId > 0 && $project === null) {
+			return new JsonResponse(['error' => 'Project not found'], 404);
+		}
+		$projectMode = $projectId > 0 || $projectName !== '';
+		if ($projectMode && (!isset($mapping['lcsc']) || !isset($mapping['quantity']))) {
+			return new JsonResponse(['error' => 'Project import requires LCSC and Quantity columns'], 400);
+		}
+		if ($projectMode && ($meta['duplicatesBehavior'] ?? 'skip') === 'update_stock') {
+			return new JsonResponse(['error' => 'Project import cannot update stock'], 400);
 		}
 
 		$categoryId = (int)($meta['defaultCategoryId'] ?? 0);
@@ -87,7 +108,11 @@ class BulkImportActions
 			return new JsonResponse(['error' => 'CSV has only a header row'], 400);
 		}
 
-		$mpnCol = $mapping['mpn'];
+		$mpnCol = $mapping['mpn'] ?? null;
+		$lcscCol = $mapping['lcsc'] ?? null;
+		$desCol = isset($mapping['designator']) && is_int($mapping['designator']) ? $mapping['designator'] : null;
+		$commentCol = isset($mapping['comment']) && is_int($mapping['comment']) ? $mapping['comment'] : null;
+		$footprintCol = isset($mapping['footprint']) && is_int($mapping['footprint']) ? $mapping['footprint'] : null;
 		$mfrCol = isset($mapping['manufacturer']) && is_int($mapping['manufacturer']) ? $mapping['manufacturer'] : null;
 		$catCol = isset($mapping['category']) && is_int($mapping['category']) ? $mapping['category'] : null;
 		$stoCol = isset($mapping['storage']) && is_int($mapping['storage']) ? $mapping['storage'] : null;
@@ -97,6 +122,11 @@ class BulkImportActions
 		$qtyCol = isset($mapping['quantity']) && is_int($mapping['quantity']) ? $mapping['quantity'] : null;
 
 		$job = new BulkImportJob;
+		if ($projectName !== '') {
+			$project = (new Project)->setName($projectName);
+			$this->em->persist($project);
+		}
+		$job->setProject($project);
 		$job->setDefaultCategory($category);
 		$job->setDefaultStorage($storage);
 		$dupRaw = $meta['duplicatesBehavior'] ?? 'skip';
@@ -104,12 +134,15 @@ class BulkImportActions
 		$user = $this->getUser();
 		if ($user instanceof User) {
 			$job->setCreatedBy($user);
+			if ($projectName !== '') $project->setUser($user);
 		}
 
 		$total = 0;
+		$byLcsc = [];
 		foreach ($rows as $i => $row) {
-			$mpn = $this->cell($row, $mpnCol);
-			if ($mpn === '') {
+			$mpn = $mpnCol !== null ? $this->cell($row, $mpnCol) : '';
+			$lcsc = $lcscCol !== null ? strtoupper($this->cell($row, $lcscCol)) : '';
+			if ($mpn === '' && $lcsc === '') {
 				// Skip blank rows silently — operators routinely leave
 				// trailing empty lines in Excel exports. We do NOT
 				// create a failed item for these; they're noise.
@@ -118,17 +151,31 @@ class BulkImportActions
 			$item = (new BulkImportJobItem)
 				->setLine($i + 1)
 				->setRawMpn($mpn)
+				->setRawLcsc($lcsc !== '' ? $lcsc : null)
+				->setRawDesignators($this->optionalCell($row, $desCol))
+				->setRawComment($this->optionalCell($row, $commentCol))
+				->setRawFootprint($this->optionalCell($row, $footprintCol))
 				->setRawManufacturer($this->optionalCell($row, $mfrCol))
 				->setRawCategory($this->optionalCell($row, $catCol))
 				->setRawStorage($this->optionalCell($row, $stoCol))
 				->setRawQuantity($this->optionalCell($row, $qtyCol));
+			if ($projectMode && $lcsc !== '' && isset($byLcsc[$lcsc])) {
+				$prior = $byLcsc[$lcsc];
+				$a = filter_var($prior->getRawQuantity(), FILTER_VALIDATE_INT);
+				$b = filter_var($item->getRawQuantity(), FILTER_VALIDATE_INT);
+				$prior->setRawQuantity($a !== false && $b !== false && $a > 0 && $b > 0 ? (string)($a + $b) : 'invalid');
+				$prior->setRawDesignators(implode(', ', array_filter([$prior->getRawDesignators(), $item->getRawDesignators()])));
+				$prior->setRawComment(implode(' | ', array_unique(array_filter([$prior->getRawComment(), $item->getRawComment()]))));
+				continue;
+			}
+			if ($projectMode && $lcsc !== '') $byLcsc[$lcsc] = $item;
 			$job->addItem($item);
 			$total++;
 		}
 		$job->setTotalRows($total);
 
 		if ($total === 0) {
-			return new JsonResponse(['error' => 'No usable rows (all MPN cells were empty)'], 400);
+			return new JsonResponse(['error' => 'No usable rows (MPN and LCSC cells were empty)'], 400);
 		}
 
 		$this->em->persist($job);
@@ -159,6 +206,10 @@ class BulkImportActions
 			$items[] = [
 				'line' => $item->getLine(),
 				'mpn' => $item->getRawMpn(),
+				'id' => $item->getId(),
+				'lcsc' => $item->getRawLcsc(),
+				'designators' => $item->getRawDesignators(),
+				'projectDecision' => $item->getProjectDecision(),
 				'manufacturer' => $item->getRawManufacturer(),
 				'category' => $item->getRawCategory(),
 				'storage' => $item->getRawStorage(),
@@ -181,8 +232,25 @@ class BulkImportActions
 			'duplicatesBehavior' => $job->getDuplicatesBehavior()->value,
 			'defaultCategory' => $job->getDefaultCategory()->getName(),
 			'defaultStorage' => $job->getDefaultStorage()->getName(),
+			'projectId' => $job->getProject()?->getId(),
+			'projectName' => $job->getProject()?->getName(),
 			'items' => $items
 		]);
+	}
+
+	#[Route(path: '/api/bulk-import-jobs/{id}/decisions', requirements: ['id' => '\\d+'], methods: ['POST'])]
+	public function decideAction(int $id, Request $request): JsonResponse
+	{
+		$data = json_decode($request->getContent(), true);
+		if (!is_array($data) || !is_array($data['decisions'] ?? null)) {
+			return new JsonResponse(['error' => 'decisions object is required'], 400);
+		}
+		try {
+			$this->projectProcessor->applyDecisions($id, $data['decisions']);
+		} catch (\InvalidArgumentException $e) {
+			return new JsonResponse(['error' => $e->getMessage()], 400);
+		}
+		return $this->getJobAction($id);
 	}
 
 	/**

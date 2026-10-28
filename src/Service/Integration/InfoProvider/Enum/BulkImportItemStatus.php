@@ -6,6 +6,7 @@ namespace Limas\Service\Integration\InfoProvider\Enum;
 enum BulkImportItemStatus: string
 {
 	case Pending = 'pending'; // not yet processed by the worker
+	case Conflict = 'conflict';
 	case Success = 'success'; // Part created cleanly
 	case Warning = 'warning'; // Part created, but a CSV override didn't resolve and the job default was used
 	case Skipped = 'skipped'; // existing Part matched in inventory (duplicatesBehavior=skip)

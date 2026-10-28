@@ -63,6 +63,7 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 			this.buildStepProgress()
 		];
 		this.callParent(arguments);
+		this.loadProjects();
 	},
 
 	// ──────────────────────────── STEP 1 ────────────────────────────
@@ -128,11 +129,34 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 			listeners: {change: () => me.refreshPreview()}
 		});
 
-		this.mpnColumn = this.buildColumnCombo('MPN', true);
+		this.mpnColumn = this.buildColumnCombo('MPN', false);
+		this.lcscColumn = this.buildColumnCombo('LCSC', false);
+		this.designatorColumn = this.buildColumnCombo('Designator', false);
+		this.commentColumn = this.buildColumnCombo('Comment', false);
+		this.footprintColumn = this.buildColumnCombo('Footprint', false);
 		this.mfrColumn = this.buildColumnCombo('Manufacturer', false);
 		this.catColumn = this.buildColumnCombo('Category', false);
 		this.stoColumn = this.buildColumnCombo('Storage', false);
 		this.qtyColumn = this.buildColumnCombo('Quantity', false);
+		this.projectModeCombo = Ext.create('Ext.form.field.ComboBox', {
+			fieldLabel: i18n('Destination'), labelWidth: 140, editable: false,
+			value: 'inventory', queryMode: 'local', displayField: 'label', valueField: 'value',
+			store: {fields: ['value', 'label'], data: [
+				{value: 'inventory', label: i18n('Inventory only')},
+				{value: 'existing', label: i18n('Existing project')},
+				{value: 'new', label: i18n('New project')}
+			]}, listeners: {change: () => me.refreshSubmitButton()}
+		});
+		this.projectCombo = Ext.create('Ext.form.field.ComboBox', {
+			fieldLabel: i18n('Project'), labelWidth: 140, queryMode: 'local',
+			displayField: 'name', valueField: 'id', forceSelection: true,
+			store: {fields: ['id', 'name'], data: []},
+			listeners: {change: () => me.refreshSubmitButton()}
+		});
+		this.projectNameField = Ext.create('Ext.form.field.Text', {
+			fieldLabel: i18n('New project name'), labelWidth: 140,
+			listeners: {change: () => me.refreshSubmitButton()}
+		});
 
 		// Duplicates strategy — what to do when an inbound row's
 		// (manufacturer, MPN) already exists in the local inventory.
@@ -218,7 +242,8 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 							defaults: {anchor: '100%', labelWidth: 140},
 							items: [
 								this.hasHeaderCheckbox,
-								this.mpnColumn, this.mfrColumn, this.catColumn, this.stoColumn, this.qtyColumn
+								this.mpnColumn, this.lcscColumn, this.mfrColumn, this.catColumn, this.stoColumn,
+								this.qtyColumn, this.designatorColumn, this.commentColumn, this.footprintColumn
 							]
 						},
 						{
@@ -242,7 +267,7 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 									title: i18n('Duplicates strategy'),
 									layout: 'vbox',
 									defaults: {anchor: '100%'},
-									items: [this.duplicatesCombo]
+									items: [this.duplicatesCombo, this.projectModeCombo, this.projectCombo, this.projectNameField]
 								}
 							]
 						}
@@ -388,7 +413,8 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 	populateColumnCombos: function () {
 		if (!this.parsedRows || this.parsedRows.length === 0) return;
 		let header = this.parsedRows[0];
-		let combos = [this.mpnColumn, this.mfrColumn, this.catColumn, this.stoColumn];
+		let combos = [this.mpnColumn, this.lcscColumn, this.mfrColumn, this.catColumn, this.stoColumn,
+			this.qtyColumn, this.designatorColumn, this.commentColumn, this.footprintColumn];
 		let data = header.map((h, i) => ({idx: i, label: 'Col ' + (i + 1) + (h ? ' (' + h + ')' : '')}));
 		combos.forEach(c => c.getStore().loadData(data));
 	},
@@ -405,11 +431,19 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 			return null;
 		};
 		let mpn = find('mpn', 'part number', 'part_number', 'partno', 'part no', 'product code');
+		let lcsc = find('lcsc');
+		let designator = find('designator', 'reference');
+		let comment = find('comment', 'value');
+		let footprint = find('footprint');
 		let mfr = find('manufacturer', 'mfr', 'brand', 'maker', 'vyrobca');
 		let cat = find('category', 'kategoria', 'cat');
 		let sto = find('storage', 'location', 'sklad', 'shelf');
 		let qty = find('quantity', 'qty', 'mnozstvo', 'count', 'pcs', 'ks');
 		if (mpn !== null) this.mpnColumn.setValue(mpn);
+		if (lcsc !== null) this.lcscColumn.setValue(lcsc);
+		if (designator !== null) this.designatorColumn.setValue(designator);
+		if (comment !== null) this.commentColumn.setValue(comment);
+		if (footprint !== null) this.footprintColumn.setValue(footprint);
 		if (mfr !== null) this.mfrColumn.setValue(mfr);
 		if (cat !== null) this.catColumn.setValue(cat);
 		if (sto !== null) this.stoColumn.setValue(sto);
@@ -453,11 +487,32 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 		// (it falls back to them when a row doesn't resolve), so we'd
 		// rather gate the submit than let the operator post a job that
 		// gets rejected at the controller.
+		let mode = this.projectModeCombo.getValue();
+		let projectReady = mode === 'inventory'
+			|| (mode === 'existing' && !!this.projectCombo.getValue())
+			|| (mode === 'new' && !!String(this.projectNameField.getValue() || '').trim());
 		let ok = this.parsedFile !== null
-			&& this.mpnColumn.getValue() !== null
+			&& (this.mpnColumn.getValue() !== null || this.lcscColumn.getValue() !== null)
+			&& (mode === 'inventory' || (this.lcscColumn.getValue() !== null && this.qtyColumn.getValue() !== null))
+			&& projectReady
 			&& this.extractIri(this.defaultCategoryCombo.getValue()) !== null
 			&& this.extractIri(this.defaultStorageCombo.getValue()) !== null;
 		this.submitButton.setDisabled(!ok);
+		this.projectCombo.setVisible(mode === 'existing');
+		this.projectNameField.setVisible(mode === 'new');
+		this.duplicatesCombo.setDisabled(mode !== 'inventory');
+	},
+
+	loadProjects: function () {
+		Ext.Ajax.request({
+			url: Limas.getBasePath() + '/api/projects?itemsPerPage=1000', method: 'GET',
+			headers: Limas.Auth.AuthenticationProvider.getAuthenticationProvider().getHeaders(),
+			success: function (response) {
+				let body = Ext.decode(response.responseText);
+				let rows = body['hydra:member'] || body.member || [];
+				this.projectCombo.getStore().loadData(rows.map(r => ({id: this.iriId(r['@id']), name: r.name})));
+			}, scope: this
+		});
 	},
 
 	// CategoryComboBox / StorageLocationPicker return the Ext model
@@ -498,13 +553,18 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 			bodyPadding: 8,
 			html: '<i class="limas-text-muted">' + i18n('Waiting for status…') + '</i>'
 		});
+		this.resolveButton = Ext.create('Ext.button.Button', {
+			text: i18n('Apply conflict decisions'), hidden: true,
+			handler: () => this.submitDecisions()
+		});
 
 		return Ext.create('Ext.panel.Panel', {
 			itemId: 'step-progress',
 			layout: 'vbox',
 			defaults: {width: '100%'},
 			bodyPadding: 12,
-			items: [this.statusPanel, this.progressBodyPanel]
+			items: [this.statusPanel, this.progressBodyPanel],
+			dockedItems: [{xtype: 'toolbar', dock: 'bottom', items: ['->', this.resolveButton]}]
 		});
 	},
 
@@ -519,11 +579,12 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 			skipped: '⊘ ' + i18n('Skipped'),
 			ambiguous: '? ' + i18n('Ambiguous'),
 			failed: '✗ ' + i18n('Failed')
+			,conflict: '? ' + i18n('Decision needed')
 		};
 		let html = '<table class="limas-grid-table" style="width:100%;">';
 		html += '<tr>'
 			+ '<th style="width:40px;">#</th>'
-			+ '<th>' + i18n('MPN') + '</th>'
+			+ '<th>' + i18n('MPN / LCSC') + '</th>'
 			+ '<th>' + i18n('Manufacturer') + '</th>'
 			+ '<th style="width:60px;">' + i18n('Qty') + '</th>'
 			+ '<th style="width:110px;">' + i18n('Status') + '</th>'
@@ -542,8 +603,14 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 			if (r.existingPartId && r.existingPartId !== r.partId) {
 				lines.push(i18n('Existing') + ' #' + r.existingPartId + ' ' + Ext.htmlEncode(r.existingPartName || ''));
 			}
-			if (r.message) {
-				lines.push('<span class="limas-text-muted">' + Ext.htmlEncode(r.message) + '</span>');
+			if (r.errorMessage) {
+				lines.push('<span class="limas-text-muted">' + Ext.htmlEncode(r.errorMessage) + '</span>');
+			}
+			if (r.status === 'conflict') {
+				lines.push('<select class="limas-project-decision" data-item-id="' + Number(r.id) + '">'
+					+ '<option value="keep">' + i18n('Keep current') + '</option>'
+					+ '<option value="replace">' + i18n('Replace') + '</option>'
+					+ '<option value="add">' + i18n('Add quantity') + '</option></select>');
 			}
 			let qtyCell = '';
 			if (r.quantityApplied !== null && r.quantityApplied !== undefined) {
@@ -554,7 +621,7 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 			}
 			html += '<tr>'
 				+ '<td class="limas-text-muted">' + (r.line || '') + '</td>'
-				+ '<td>' + Ext.htmlEncode(r.mpn || '') + '</td>'
+			+ '<td>' + Ext.htmlEncode(r.lcsc || r.mpn || '') + '</td>'
 				+ '<td>' + Ext.htmlEncode(r.manufacturer || '') + '</td>'
 				+ '<td style="text-align:right;">' + qtyCell + '</td>'
 				+ '<td>' + pill + '</td>'
@@ -572,13 +639,21 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 			Ext.toast({html: i18n('Default Category and Storage are required.'), align: 't', closable: true});
 			return;
 		}
+		let mode = this.projectModeCombo.getValue();
 		let meta = {
 			hasHeader: this.hasHeaderCheckbox.getValue(),
-			mapping: {mpn: this.mpnColumn.getValue()},
+			mapping: {},
 			defaultCategoryId: this.iriId(catIri),
 			defaultStorageLocationId: this.iriId(stoIri),
-			duplicatesBehavior: this.duplicatesCombo.getValue() || 'skip'
+			duplicatesBehavior: mode === 'inventory' ? (this.duplicatesCombo.getValue() || 'skip') : 'skip'
 		};
+		if (this.mpnColumn.getValue() !== null) meta.mapping.mpn = this.mpnColumn.getValue();
+		if (this.lcscColumn.getValue() !== null) meta.mapping.lcsc = this.lcscColumn.getValue();
+		if (this.designatorColumn.getValue() !== null) meta.mapping.designator = this.designatorColumn.getValue();
+		if (this.commentColumn.getValue() !== null) meta.mapping.comment = this.commentColumn.getValue();
+		if (this.footprintColumn.getValue() !== null) meta.mapping.footprint = this.footprintColumn.getValue();
+		if (mode === 'existing') meta.projectId = this.projectCombo.getValue();
+		if (mode === 'new') meta.projectName = String(this.projectNameField.getValue()).trim();
 		if (this.mfrColumn.getValue() !== null) meta.mapping.manufacturer = this.mfrColumn.getValue();
 		if (this.catColumn.getValue() !== null) meta.mapping.category = this.catColumn.getValue();
 		if (this.stoColumn.getValue() !== null) meta.mapping.storage = this.stoColumn.getValue();
@@ -650,10 +725,26 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 					i18n('processed') + ' ' + j.processedRows + ' / ' + j.totalRows
 				);
 				this.progressBodyPanel.update(this.renderProgressRows(j.items || []));
-				if (j.status === 'completed' || j.status === 'partial' || j.status === 'failed') {
+				this.resolveButton.setVisible(j.status === 'waiting_decision');
+				if (j.status === 'completed' || j.status === 'partial' || j.status === 'failed' || j.status === 'waiting_decision') {
 					this.stopPolling();
 				}
 			},
+			scope: this
+		});
+	},
+
+	submitDecisions: function () {
+		let decisions = {};
+		this.progressBodyPanel.getEl().dom.querySelectorAll('select.limas-project-decision').forEach(el => {
+			decisions[el.dataset.itemId] = el.value;
+		});
+		Ext.Ajax.request({
+			url: Limas.getBasePath() + '/api/bulk-import-jobs/' + this.jobId + '/decisions',
+			method: 'POST', jsonData: {decisions},
+			headers: Limas.Auth.AuthenticationProvider.getAuthenticationProvider().getHeaders(),
+			success: function () { this.resolveButton.hide(); this.startPolling(); },
+			failure: function (response) { Ext.toast({html: i18n('Conflict resolution failed: HTTP ') + response.status, align: 't'}); },
 			scope: this
 		});
 	},

@@ -41,6 +41,18 @@ class BulkImportJobItem
 	#[ORM\Column(type: Types::STRING, length: 255)]
 	#[Groups(['default'])]
 	private string $rawMpn = '';
+	#[ORM\Column(type: Types::STRING, length: 64, nullable: true)]
+	#[Groups(['default'])]
+	private ?string $rawLcsc = null;
+	#[ORM\Column(type: Types::TEXT, nullable: true)]
+	#[Groups(['default'])]
+	private ?string $rawDesignators = null;
+	#[ORM\Column(type: Types::TEXT, nullable: true)]
+	#[Groups(['default'])]
+	private ?string $rawComment = null;
+	#[ORM\Column(type: Types::STRING, length: 255, nullable: true)]
+	#[Groups(['default'])]
+	private ?string $rawFootprint = null;
 	#[ORM\Column(type: Types::STRING, length: 255, nullable: true)]
 	#[Groups(['default'])]
 	private ?string $rawManufacturer = null;
@@ -85,6 +97,8 @@ class BulkImportJobItem
 	#[ORM\JoinColumn(name: 'existingPart_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')]
 	#[Groups(['default'])]
 	private ?Part $existingPart = null;
+	#[ORM\Column(type: Types::STRING, length: 20, nullable: true)]
+	private ?string $projectDecision = null;
 
 
 	public function getJob(): BulkImportJob
@@ -113,6 +127,17 @@ class BulkImportJobItem
 	{
 		return $this->rawMpn;
 	}
+
+	public function getRawLcsc(): ?string { return $this->rawLcsc; }
+	public function setRawLcsc(?string $value): self { $this->rawLcsc = $value; return $this; }
+	public function getRawDesignators(): ?string { return $this->rawDesignators; }
+	public function setRawDesignators(?string $value): self { $this->rawDesignators = $value; return $this; }
+	public function getRawComment(): ?string { return $this->rawComment; }
+	public function setRawComment(?string $value): self { $this->rawComment = $value; return $this; }
+	public function getRawFootprint(): ?string { return $this->rawFootprint; }
+	public function setRawFootprint(?string $value): self { $this->rawFootprint = $value; return $this; }
+	public function getProjectDecision(): ?string { return $this->projectDecision; }
+	public function setProjectDecision(?string $value): self { $this->projectDecision = $value; return $this; }
 
 	public function setRawMpn(string $mpn): self
 	{

@@ -59,6 +59,9 @@ class BulkImportJob
 	#[ORM\Column(type: Types::STRING, length: 20, enumType: BulkImportDuplicatesBehavior::class)]
 	#[Groups(['default'])]
 	private BulkImportDuplicatesBehavior $duplicatesBehavior = BulkImportDuplicatesBehavior::Skip;
+	#[ORM\ManyToOne(targetEntity: Project::class)]
+	#[ORM\JoinColumn(name: 'project_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')]
+	private ?Project $project = null;
 	/** @var Collection<int, BulkImportJobItem> */
 	#[ORM\OneToMany(targetEntity: BulkImportJobItem::class, mappedBy: 'job', cascade: ['persist', 'remove'], orphanRemoval: true)]
 	#[Groups(['default'])]
@@ -151,6 +154,17 @@ class BulkImportJob
 	public function getDuplicatesBehavior(): BulkImportDuplicatesBehavior
 	{
 		return $this->duplicatesBehavior;
+	}
+
+	public function getProject(): ?Project
+	{
+		return $this->project;
+	}
+
+	public function setProject(?Project $project): self
+	{
+		$this->project = $project;
+		return $this;
 	}
 
 	public function setDuplicatesBehavior(BulkImportDuplicatesBehavior $b): self

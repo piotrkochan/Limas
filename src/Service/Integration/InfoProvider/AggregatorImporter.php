@@ -65,13 +65,21 @@ final readonly class AggregatorImporter
 		StorageLocation         $storageLocation
 	): Part
 	{
-		$mfrRawName = $candidate->manufacturerName->chosenValue ?? '';
-		$mpn = $candidate->manufacturerPartNumber->chosenValue ?? '';
-		if ($mfrRawName === '' || $mpn === '') {
+		$mfrRawName = trim((string)($candidate->manufacturerName->chosenValue ?? ''));
+		$mpn = trim((string)($candidate->manufacturerPartNumber->chosenValue ?? ''));
+		$lcscCode = strtoupper(trim((string)($candidate->providerSpecific['lcsc']->sourceSku ?? '')));
+		$hasExactLcsc = (bool)preg_match('/^C[1-9][0-9]*$/', $lcscCode);
+		if ($mpn === '' && $hasExactLcsc) {
+			$mpn = $lcscCode;
+		}
+		if ($mpn === '' || ($mfrRawName === '' && !$hasExactLcsc)) {
 			throw new \InvalidArgumentException('Candidate is missing manufacturer name or MPN — cannot import.');
 		}
 
-		$manufacturer = $this->resolveManufacturer($mfrRawName);
+		// A real LCSC brand is registered automatically by resolveManufacturer.
+		// If LCSC omits it, keep the manufacturer relation empty rather than
+		// inventing a manufacturer named "Unknown".
+		$manufacturer = $mfrRawName !== '' ? $this->resolveManufacturer($mfrRawName) : null;
 
 		$part = new Part;
 		$part->setName($mpn);
@@ -92,10 +100,12 @@ final readonly class AggregatorImporter
 			}
 		}
 
-		$pm = (new PartManufacturer)
-			->setManufacturer($manufacturer)
-			->setPartNumber($mpn);
-		$part->addManufacturer($pm);
+		if ($manufacturer !== null) {
+			$pm = (new PartManufacturer)
+				->setManufacturer($manufacturer)
+				->setPartNumber($mpn);
+			$part->addManufacturer($pm);
+		}
 
 		foreach ($candidate->providerSpecific as $sourceName => $ds) {
 			$distributor = $this->resolveDistributor($sourceName);
@@ -103,13 +113,20 @@ final readonly class AggregatorImporter
 				->setDistributor($distributor)
 				->setSku($ds->sourceSku)
 				->setOrderNumber($ds->sourceSku);
-			if ($ds->priceBreaks !== []) {
-				$first = $ds->priceBreaks[0];
+			$breaks = [];
+			foreach ($ds->priceBreaks as $break) {
+				if ($break->quantity > 0 && is_finite($break->price) && $break->price >= 0) {
+					$breaks[] = ['quantity' => $break->quantity, 'price' => $break->price];
+				}
+			}
+			if ($breaks !== []) {
+				$pd->setPriceBreaks($breaks);
+				$first = $pd->getPriceBreaks()[0];
 				// Fixed-point, not (string)$float — a tiny price would otherwise
 				// stringify as "1.0E-5" and the DECIMAL(13,4) column can't parse
 				// scientific notation. 4 dp matches the column scale.
-				$pd->setPrice(sprintf('%.4f', $first->price));
-				$pd->setPackagingUnit(max($first->quantity, 1));
+				$pd->setPrice(sprintf('%.4f', (float)$first['price']));
+				$pd->setPackagingUnit(max($first['quantity'], 1));
 				if ($ds->currency !== null && $ds->currency !== '') {
 					$pd->setCurrency(substr($ds->currency, 0, 3));
 				}
@@ -136,13 +153,15 @@ final readonly class AggregatorImporter
 		$this->em->persist($part);
 		$this->em->flush();
 
-		$this->maybeRegisterAliases($manufacturer, $candidate->manufacturerName);
+		if ($manufacturer !== null) {
+			$this->maybeRegisterAliases($manufacturer, $candidate->manufacturerName);
+		}
 
 		// Download attachments AFTER the Part is persisted — `addAttachment`
 		// + cascade does the PartAttachment insert; CAS dedup means the
 		// physical file lands on disk only once regardless of how many
 		// future Parts pull the same datasheet.
-		$mfrName = $manufacturer->getName() ?? '';
+		$mfrName = $manufacturer?->getName() ?? '';
 		$this->attachIfPresent($part, $candidate->datasheetUrl, 'Datasheet', $this->datasheetUrlResolver->candidates($mfrName, $mpn));
 		$this->attachIfPresent($part, $candidate->imageUrl, 'Product image', []);
 
@@ -279,6 +298,19 @@ final readonly class AggregatorImporter
 		$canonical = $this->manufacturerCanonicalizer->canonicalize($rawName);
 		if ($canonical !== null) {
 			return $canonical;
+		}
+		// An unresolved alias may coexist with a Manufacturer created before
+		// aliases were introduced. Reuse that row before inserting a new one.
+		$existing = $this->em->createQueryBuilder()
+			->select('m')
+			->from(Manufacturer::class, 'm')
+			->where('LOWER(m.name) = :name')
+			->setParameter('name', mb_strtolower(trim($rawName)))
+			->setMaxResults(1)
+			->getQuery()->getOneOrNullResult();
+		if ($existing instanceof Manufacturer) {
+			$this->manufacturerCanonicalizer->registerAlias($existing, $rawName);
+			return $existing;
 		}
 		$mfr = new Manufacturer;
 		$mfr->setName($rawName);

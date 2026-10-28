@@ -4,8 +4,11 @@ namespace Limas\Controller\Actions;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Limas\Entity\PartCategory;
+use Limas\Entity\Project;
+use Limas\Entity\ProjectPart;
 use Limas\Entity\StorageLocation;
 use Limas\Service\Integration\InfoProvider\AggregatorImporter;
+use Limas\Service\Integration\InfoProvider\LcscPartResolver;
 use Limas\Service\Integration\InfoProvider\Dto\AggregatedPartCandidate;
 use Limas\Service\Integration\InfoProvider\InfoProviderAggregator;
 use Limas\Service\ManufacturerCanonicalizer;
@@ -33,8 +36,9 @@ use Symfony\Component\Serializer\SerializerInterface;
  *
  *   POST /api/distributor-aggregator/import
  *     body: { mpn, manufacturer, categoryId, storageLocationId, [sources] }
- *     re-runs aggregator+merge, picks the candidate matching (manufacturer, MPN),
- *     and creates a fully linked Part. Returns {partId, ...summary}.
+ *       or { lcsc, categoryId, storageLocationId, [projectId, quantity] }
+ *     The LCSC path resolves the catalog ID exactly. The MPN path re-runs the
+ *     aggregator and picks a matching candidate. Both return a Part summary.
  */
 class InfoProviderAggregatorActions
 	extends AbstractController
@@ -42,6 +46,7 @@ class InfoProviderAggregatorActions
 	public function __construct(
 		private readonly InfoProviderAggregator $aggregator,
 		private readonly AggregatorImporter     $importer,
+		private readonly LcscPartResolver       $lcscResolver,
 		private readonly EntityManagerInterface $em,
 		private readonly SerializerInterface    $serializer
 	)
@@ -210,18 +215,37 @@ class InfoProviderAggregatorActions
 
 		$mpn = trim((string)($body['mpn'] ?? ''));
 		$mfr = trim((string)($body['manufacturer'] ?? ''));
+		$lcsc = strtoupper(trim((string)($body['lcsc'] ?? $body['lcscId'] ?? '')));
 		$categoryId = (int)($body['categoryId'] ?? 0);
 		$storageId = (int)($body['storageLocationId'] ?? 0);
 		$sources = is_array($body['sources'] ?? null) ? array_map('strval', $body['sources']) : null;
 		$limit = max(1, min(50, (int)($body['limit'] ?? 10)));
+		// Existing clients sometimes put an LCSC code in the MPN field.
+		if ($lcsc === '' && preg_match('/^C[1-9][0-9]*$/i', $mpn)
+			&& ($mfr === '' || ($sources !== null && in_array('lcsc', $sources, true)))) {
+			$lcsc = strtoupper($mpn);
+		}
 
 		$missing = [];
-		if ($mpn === '') $missing[] = 'mpn';
-		if ($mfr === '') $missing[] = 'manufacturer';
+		if ($lcsc === '' && $mpn === '') $missing[] = 'mpn or lcsc';
+		if ($lcsc === '' && $mfr === '') $missing[] = 'manufacturer';
 		if ($categoryId <= 0) $missing[] = 'categoryId';
 		if ($storageId <= 0) $missing[] = 'storageLocationId';
 		if ($missing !== []) {
 			return new JsonResponse(['error' => 'Missing/invalid: ' . implode(', ', $missing)], 400);
+		}
+		if ($lcsc !== '' && !preg_match('/^C[1-9][0-9]*$/', $lcsc)) {
+			return new JsonResponse(['error' => 'Invalid LCSC ID: ' . $lcsc], 400);
+		}
+		$projectRequested = array_key_exists('projectId', $body) || array_key_exists('quantity', $body);
+		$projectId = (int)($body['projectId'] ?? 0);
+		$quantity = filter_var($body['quantity'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+		if ($projectRequested && ($projectId < 1 || !is_int($quantity))) {
+			return new JsonResponse(['error' => 'projectId and positive integer quantity are required together'], 400);
+		}
+		$project = $projectRequested ? $this->em->find(Project::class, $projectId) : null;
+		if ($projectRequested && $project === null) {
+			return new JsonResponse(['error' => 'Project not found'], 404);
 		}
 
 		$category = $this->em->find(PartCategory::class, $categoryId);
@@ -233,29 +257,55 @@ class InfoProviderAggregatorActions
 			return new JsonResponse(['error' => "StorageLocation #$storageId not found"], 404);
 		}
 
-		$candidates = $this->aggregator->searchByMpnAndMerge($mpn, $sources, $limit);
-		$picked = $this->findCandidate($candidates, $mfr, $mpn);
-		if ($picked === null) {
-			return new JsonResponse([
-				'error' => sprintf('No matching candidate for manufacturer "%s" + MPN "%s"', $mfr, $mpn),
-				'available' => array_map(static fn(AggregatedPartCandidate $c) => [
-					'manufacturer' => $c->manufacturerName->chosenValue,
-					'mpn' => $c->manufacturerPartNumber->chosenValue,
-					'sources' => $c->contributingSources
-				], $candidates)
-			], 404);
+		if ($lcsc !== '') {
+			try {
+				[$part, $created] = $this->lcscResolver->resolve($lcsc, $category, $storage);
+			} catch (\InvalidArgumentException $error) {
+				return new JsonResponse(['error' => $error->getMessage()], 409);
+			} catch (\RuntimeException $error) {
+				return new JsonResponse(['error' => $error->getMessage()], 404);
+			}
+			$picked = null;
+		} else {
+			$candidates = $this->aggregator->searchByMpnAndMerge($mpn, $sources, $limit);
+			$picked = $this->findCandidate($candidates, $mfr, $mpn);
+			if ($picked === null) {
+				return new JsonResponse([
+					'error' => sprintf('No matching candidate for manufacturer "%s" + MPN "%s"', $mfr, $mpn),
+					'available' => array_map(static fn(AggregatedPartCandidate $c) => [
+						'manufacturer' => $c->manufacturerName->chosenValue,
+						'mpn' => $c->manufacturerPartNumber->chosenValue,
+						'sources' => $c->contributingSources
+					], $candidates)
+				], 404);
+			}
+			$part = $this->importer->import($picked, $category, $storage);
+			$created = true;
 		}
-
-		$part = $this->importer->import($picked, $category, $storage);
+		$projectPart = null;
+		if ($project !== null) {
+			$rows = $this->em->getRepository(ProjectPart::class)->findBy(['project' => $project, 'part' => $part]);
+			if (count($rows) > 1) {
+				return new JsonResponse(['error' => 'Project has multiple rows for this Part'], 409);
+			}
+			$projectPart = $rows[0] ?? (new ProjectPart)->setProject($project)->setPart($part)->setRemarks(null);
+			$projectPart->setQuantity($quantity);
+			$this->em->persist($projectPart);
+			$this->em->flush();
+		}
 		return new JsonResponse([
 			'partId' => $part->getId(),
+			'created' => $created,
 			'partName' => $part->getName(),
+			'projectId' => $project?->getId(),
+			'projectPartId' => $projectPart?->getId(),
+			'quantity' => $projectPart?->getQuantity(),
 			'manufacturers' => count($part->getManufacturers()),
 			'distributors' => count($part->getDistributors()),
 			'parameters' => count($part->getParameters()),
-			'contributingSources' => $picked->contributingSources,
-			'conflicts' => $picked->conflicts
-		], 201);
+			'contributingSources' => $picked?->contributingSources ?? ['lcsc'],
+			'conflicts' => $picked?->conflicts ?? []
+		], $created ? 201 : 200);
 	}
 
 	/**

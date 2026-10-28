@@ -37,7 +37,9 @@ final readonly class BulkImportJobProcessor
 	public function __construct(
 		private EntityManagerInterface $em,
 		private InfoProviderAggregator $aggregator,
-		private AggregatorImporter     $importer
+		private AggregatorImporter     $importer,
+		private LcscPartResolver $lcscResolver,
+		private BulkImportProjectProcessor $projectProcessor
 	)
 	{
 	}
@@ -58,6 +60,9 @@ final readonly class BulkImportJobProcessor
 		$job = $this->em->find(BulkImportJob::class, $jobId);
 		if ($job === null) {
 			throw new \RuntimeException(sprintf('BulkImportJob #%d not found', $jobId));
+		}
+		if ($job->getProject() !== null) {
+			return $this->projectProcessor->run($job, $onProgress);
 		}
 
 		// Idempotency: re-running a finished job is a no-op so a botched Messenger retry can't double-import
@@ -80,6 +85,7 @@ final readonly class BulkImportJobProcessor
 			try {
 				$this->processItem($job, $item);
 			} catch (\Throwable $e) {
+				if (!$this->em->isOpen()) throw $e;
 				$item->setStatus(BulkImportItemStatus::Failed)
 					->setErrorMessage('Worker exception: ' . $e->getMessage());
 			}
@@ -101,6 +107,10 @@ final readonly class BulkImportJobProcessor
 
 	private function processItem(BulkImportJob $job, BulkImportJobItem $item): void
 	{
+		if ($item->getRawLcsc() !== null) {
+			$this->processLcscItem($job, $item);
+			return;
+		}
 		$mpn = $item->getRawMpn();
 		$rawMfr = $item->getRawManufacturer() ?? '';
 
@@ -225,6 +235,59 @@ final readonly class BulkImportJobProcessor
 		} else {
 			$item->setStatus(BulkImportItemStatus::Success);
 		}
+	}
+
+	private function processLcscItem(BulkImportJob $job, BulkImportJobItem $item): void
+	{
+		$id = strtoupper(trim($item->getRawLcsc()));
+		if (!preg_match('/^C[1-9][0-9]*$/', $id)) {
+			throw new \InvalidArgumentException('Invalid LCSC ID: ' . $id);
+		}
+		$matches = $this->lcscResolver->findExisting($id);
+		if (count($matches) > 1) {
+			$item->setStatus(BulkImportItemStatus::Ambiguous)->setErrorMessage('Multiple Parts already use LCSC ID ' . $id);
+			return;
+		}
+		$existing = $matches[0] ?? null;
+		$mode = $job->getDuplicatesBehavior();
+		if ($existing !== null && $mode === BulkImportDuplicatesBehavior::Skip) {
+			$item->setExistingPart($existing)->setStatus(BulkImportItemStatus::Skipped)
+				->setErrorMessage('Already in inventory as Part #' . $existing->getId());
+			return;
+		}
+		if ($existing !== null && $mode === BulkImportDuplicatesBehavior::UpdateStock) {
+			$qty = $this->parseQuantity($item->getRawQuantity());
+			if ($qty === null) {
+				$item->setExistingPart($existing)->setStatus(BulkImportItemStatus::Skipped)
+					->setErrorMessage('Quantity missing or invalid; no stock change.');
+				return;
+			}
+			$this->addStockEntry($job, $existing, $qty, 'Bulk import LCSC: restock');
+			$item->setExistingPart($existing)->setQuantityApplied($qty)->setStatus(BulkImportItemStatus::Success);
+			return;
+		}
+		if ($mode === BulkImportDuplicatesBehavior::UpdateStock && $this->parseQuantity($item->getRawQuantity()) === null) {
+			$item->setStatus(BulkImportItemStatus::Failed)->setErrorMessage('UpdateStock requires positive Quantity.');
+			return;
+		}
+		if ($existing !== null) {
+			$candidate = $this->aggregator->deepenCandidate(['lcsc' => $id]);
+			if ($candidate === null || ($candidate->providerSpecific['lcsc']->sourceSku ?? null) !== $id) {
+				throw new \RuntimeException('LCSC ID not found: ' . $id);
+			}
+			$part = $this->importer->import($candidate, $job->getDefaultCategory(), $job->getDefaultStorage());
+			$item->setExistingPart($existing)->setPart($part)->setStatus(BulkImportItemStatus::Warning)
+				->setErrorMessage('Duplicate created on purpose for LCSC ID ' . $id);
+			return;
+		}
+		[$part] = $this->lcscResolver->resolve($id, $job->getDefaultCategory(), $job->getDefaultStorage());
+		$item->setPart($part);
+		if ($mode === BulkImportDuplicatesBehavior::UpdateStock) {
+			$qty = $this->parseQuantity($item->getRawQuantity());
+			$this->addStockEntry($job, $part, $qty, 'Bulk import LCSC: initial stock');
+			$item->setQuantityApplied($qty);
+		}
+		$item->setStatus(BulkImportItemStatus::Success);
 	}
 
 	/**

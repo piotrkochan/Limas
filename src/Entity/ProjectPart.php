@@ -50,7 +50,7 @@ class ProjectPart
 	#[ORM\ManyToOne(targetEntity: Project::class, cascade: ['persist'], inversedBy: 'parts')]
 	#[Assert\NotNull]
 	private ?Project $project;
-	#[ORM\Column(type: Types::STRING, nullable: true)]
+	#[ORM\Column(type: Types::TEXT, nullable: true)]
 	#[Groups(['default'])]
 	private ?string $remarks;
 	#[ORM\Column(type: Types::STRING, options: ['default' => ''])]
