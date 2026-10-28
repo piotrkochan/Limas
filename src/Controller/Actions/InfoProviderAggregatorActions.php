@@ -6,7 +6,9 @@ use Doctrine\ORM\EntityManagerInterface;
 use Limas\Entity\PartCategory;
 use Limas\Entity\Project;
 use Limas\Entity\ProjectPart;
+use Limas\Entity\StockEntry;
 use Limas\Entity\StorageLocation;
+use Limas\Entity\User;
 use Limas\Service\Integration\InfoProvider\AggregatorImporter;
 use Limas\Service\Integration\InfoProvider\LcscPartResolver;
 use Limas\Service\Integration\InfoProvider\Dto\AggregatedPartCandidate;
@@ -36,7 +38,7 @@ use Symfony\Component\Serializer\SerializerInterface;
  *
  *   POST /api/distributor-aggregator/import
  *     body: { mpn, manufacturer, categoryId, storageLocationId, [sources] }
- *       or { lcsc, categoryId, storageLocationId, [projectId, quantity] }
+ *       or { lcsc, categoryId, storageLocationId, [quantity], [projectId, projectQuantity] }
  *     The LCSC path resolves the catalog ID exactly. The MPN path re-runs the
  *     aggregator and picks a matching candidate. Both return a Part summary.
  */
@@ -237,11 +239,26 @@ class InfoProviderAggregatorActions
 		if ($lcsc !== '' && !preg_match('/^C[1-9][0-9]*$/', $lcsc)) {
 			return new JsonResponse(['error' => 'Invalid LCSC ID: ' . $lcsc], 400);
 		}
-		$projectRequested = array_key_exists('projectId', $body) || array_key_exists('quantity', $body);
+		$stockRequested = array_key_exists('quantity', $body);
+		$stockQuantity = filter_var($body['quantity'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+		if ($stockRequested && !is_int($stockQuantity)) {
+			return new JsonResponse(['error' => 'quantity must be a positive integer'], 400);
+		}
+		$projectRequested = array_key_exists('projectId', $body);
 		$projectId = (int)($body['projectId'] ?? 0);
-		$quantity = filter_var($body['quantity'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
-		if ($projectRequested && ($projectId < 1 || !is_int($quantity))) {
-			return new JsonResponse(['error' => 'projectId and positive integer quantity are required together'], 400);
+		if ($projectRequested && $projectId < 1) {
+			return new JsonResponse(['error' => 'projectId must be a positive integer'], 400);
+		}
+		if (!$projectRequested && array_key_exists('projectQuantity', $body)) {
+			return new JsonResponse(['error' => 'projectQuantity requires projectId'], 400);
+		}
+		$projectQuantity = filter_var($body['projectQuantity'] ?? 1, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+		if ($projectRequested && !is_int($projectQuantity)) {
+			return new JsonResponse(['error' => 'projectQuantity must be a positive integer'], 400);
+		}
+		$user = $stockRequested ? $this->getUser() : null;
+		if ($stockRequested && !$user instanceof User) {
+			return new JsonResponse(['error' => 'Authenticated Limas user is required to receive stock'], 401);
 		}
 		$project = $projectRequested ? $this->em->find(Project::class, $projectId) : null;
 		if ($projectRequested && $project === null) {
@@ -289,8 +306,18 @@ class InfoProviderAggregatorActions
 				return new JsonResponse(['error' => 'Project has multiple rows for this Part'], 409);
 			}
 			$projectPart = $rows[0] ?? (new ProjectPart)->setProject($project)->setPart($part)->setRemarks(null);
-			$projectPart->setQuantity($quantity);
+			$projectPart->setQuantity($projectQuantity);
 			$this->em->persist($projectPart);
+		}
+		if ($stockRequested) {
+			$stock = (new StockEntry)
+				->setUser($user)
+				->setStockLevel($stockQuantity)
+				->setComment('Distributor import: received stock');
+			$part->addStockLevel($stock);
+			$this->em->persist($stock);
+		}
+		if ($project !== null || $stockRequested) {
 			$this->em->flush();
 		}
 		return new JsonResponse([
@@ -299,7 +326,9 @@ class InfoProviderAggregatorActions
 			'partName' => $part->getName(),
 			'projectId' => $project?->getId(),
 			'projectPartId' => $projectPart?->getId(),
-			'quantity' => $projectPart?->getQuantity(),
+			'quantity' => $stockRequested ? $stockQuantity : null,
+			'projectQuantity' => $projectPart?->getQuantity(),
+			'stockLevel' => $part->getStockLevel(),
 			'manufacturers' => count($part->getManufacturers()),
 			'distributors' => count($part->getDistributors()),
 			'parameters' => count($part->getParameters()),
