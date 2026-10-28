@@ -4,14 +4,21 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const classes = {};
+class FilterPlugin {
+  constructor(enabled, filter = null) { this.enabled = enabled; this.filter = filter; }
+  isEnabled() { return this.enabled; }
+  getFilter() { throw new Error('A disabled filter must not be rebuilt'); }
+}
+const Limas = {Util: {FilterPlugin}};
 const Ext = {
   define: (name, definition) => { classes[name] = definition; },
   Array: {each: (items, callback) => items.forEach(callback)},
+  decode: JSON.parse,
   htmlEncode: text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;')
 };
-for (const filename of ['PartCategoryTree.js', 'PartsManager.js']) {
+for (const filename of ['PartCategoryTree.js', 'PartsManager.js', 'PartFilterPanel.js']) {
   const file = path.join(__dirname, '../../assets/limas/Components/Part', filename);
-  vm.runInNewContext(fs.readFileSync(file, 'utf8'), {Ext, i18n: text => text}, {filename: file});
+  vm.runInNewContext(fs.readFileSync(file, 'utf8'), {Ext, Limas, i18n: text => text}, {filename: file});
 }
 
 function node(id, children = []) {
@@ -58,5 +65,32 @@ manager.onProjectContextChange.call(context, null, '');
 assert.equal(context.activeProject, '');
 assert.equal(context.projectContextFilter, null);
 assert.equal(changes.filter(change => Array.isArray(change) && change[0] === 'remove').length, 1);
+
+let request;
+let responseCounts;
+Ext.Ajax = {request: options => { request = options; }};
+manager.refreshCategoryCounts.call({
+  activeProject: '/api/projects/3',
+  tree: {setPartCounts: counts => { responseCounts = counts; }}
+});
+assert.equal(request.method, 'GET');
+assert.equal(request.params.project, '3');
+request.success.call(request.scope, {responseText: '{"2":1}'});
+assert.equal(responseCounts['2'], 1);
+
+const disabledFilter = new FilterPlugin(false);
+let disabledCalls = 0;
+const filterPanel = {
+  suspendRemovals: false,
+  filterControls: [{findPlugin: () => disabledFilter, disableFilter: () => { disabledCalls++; }}],
+  store: {getFilters: () => ({contains: () => false})}
+};
+classes['Limas.PartFilterPanel']._onFilterRemove.call(filterPanel);
+assert.equal(disabledCalls, 0);
+
+const enabledFilter = new FilterPlugin(true, {id: 'categoryFilter'});
+filterPanel.filterControls = [{findPlugin: () => enabledFilter, disableFilter: () => { disabledCalls++; }}];
+classes['Limas.PartFilterPanel']._onFilterRemove.call(filterPanel);
+assert.equal(disabledCalls, 1);
 
 console.log('Part Manager category counts and project context passed');

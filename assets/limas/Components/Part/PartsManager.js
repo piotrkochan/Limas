@@ -346,6 +346,7 @@ Ext.define('Limas.PartManager', {
 		let match = projectIri.match(/(\d+)$/);
 		Ext.Ajax.request({
 			url: '/api/part_categories/partCounts',
+			method: 'GET',
 			params: match ? {project: match[1]} : {},
 			scope: this,
 			success: function (response) {

@@ -135,8 +135,8 @@ Ext.define('Limas.PartFilterPanel', {
 		for (let i = 0; i < this.filterControls.length; i++) {
 			filterPlugin = this.filterControls[i].findPlugin('filter');
 
-			if (filterPlugin instanceof Limas.Util.FilterPlugin) {
-				if (!this.store.getFilters().contains(filterPlugin.getFilter())) {
+			if (filterPlugin instanceof Limas.Util.FilterPlugin && filterPlugin.isEnabled() && filterPlugin.filter) {
+				if (!this.store.getFilters().contains(filterPlugin.filter)) {
 					this.filterControls[i].disableFilter();
 				}
 			}
