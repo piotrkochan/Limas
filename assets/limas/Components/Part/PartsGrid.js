@@ -354,13 +354,16 @@ Ext.define('Limas.PartsGrid', {
 		if (!combo.rendered) return;
 		let input = combo.inputEl && combo.inputEl.dom;
 		if (!input) return;
-		let metrics = Ext.util.TextMetrics.createInstance(input);
-		let maxText = String(combo.fieldLabel || '');
+		let canvas = input.ownerDocument.createElement('canvas');
+		let context = canvas.getContext('2d');
+		if (!context) return;
+		let style = window.getComputedStyle(input);
+		context.font = style.font || (style.fontSize + ' ' + style.fontFamily);
+		let textWidth = 0;
 		store.each(function (record) {
 			let label = String(record.get(displayField) || '');
-			if (metrics.getWidth(label) > metrics.getWidth(maxText)) maxText = label;
+			textWidth = Math.max(textWidth, context.measureText(label).width);
 		});
-		let textWidth = metrics.getWidth(maxText);
 		let width = Math.ceil(textWidth + (combo.labelWidth || 0) + 50);
 		combo.setWidth(Math.min(Math.max(width, 110), 420));
 	},

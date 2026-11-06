@@ -21,7 +21,10 @@ const Ext = {
   data: {StoreManager: {lookup: () => distributorStore}},
   htmlEncode: value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;')
 };
-const context = {Ext, i18n: text => text, window: {open: (...args) => opened.push(args)}};
+const context = {Ext, i18n: text => text, window: {
+  open: (...args) => opened.push(args),
+  getComputedStyle: () => ({font: '14px sans-serif'})
+}};
 for (const filename of ['PartsGrid.js', 'PartsManager.js']) {
   const file = path.join(__dirname, '../../assets/limas/Components/Part', filename);
   vm.runInNewContext(fs.readFileSync(file, 'utf8'), context, {filename: file});
@@ -30,6 +33,16 @@ for (const filename of ['PartsGrid.js', 'PartsManager.js']) {
 const part = {get: key => key === 'distributorNumbers'
   ? {'/api/distributors/30': {sku: 'C25862', orderNumber: 'C25862'}} : null};
 const gridClass = classes['Limas.PartsGrid'];
+let selectorWidth;
+gridClass.fitCatalogSelector({
+  rendered: true,
+  inputEl: {dom: {ownerDocument: {createElement: () => ({
+    getContext: () => ({measureText: text => ({width: text.length * 10})})
+  })}}},
+  labelWidth: 35,
+  setWidth: width => { selectorWidth = width; }
+}, {each: callback => ['SKU', 'Order Number'].forEach(label => callback({get: () => label}))}, 'label');
+assert.equal(selectorWidth, 205);
 const grid = {
   selectedDistributorId: '/api/distributors/30',
   selectedDistributorName: 'lcsc',
