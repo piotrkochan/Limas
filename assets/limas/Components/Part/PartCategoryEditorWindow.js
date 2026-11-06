@@ -1,3 +1,34 @@
+// Use the browser's color input directly. Ext.form.field.Text's value
+// bookkeeping can reset the native picker to its previous color.
+Ext.define('Limas.ColorInput', {
+	extend: 'Ext.Component',
+	autoEl: {tag: 'input', type: 'color'},
+	width: 65,
+	height: 30,
+	value: '#d4ad4a',
+	afterRender: function () {
+		this.callParent(arguments);
+		this.el.dom.value = this.value;
+		this.el.dom.disabled = !!this.disabled;
+		this.mon(this.el, 'input', this.onNativeColorChange, this);
+		this.mon(this.el, 'change', this.onNativeColorChange, this);
+	},
+	onNativeColorChange: function () {
+		this.value = this.el.dom.value;
+	},
+	getValue: function () {
+		return this.rendered ? this.el.dom.value : this.value;
+	},
+	setValue: function (value) {
+		this.value = value;
+		if (this.rendered) this.el.dom.value = value;
+	},
+	setDisabled: function (disabled) {
+		this.callParent(arguments);
+		if (this.rendered) this.el.dom.disabled = disabled;
+	}
+});
+
 /**
  * PartCategory-specific editor window. Extends the generic CategoryEditorWindow
  * with a second tab carrying the per-category default parameter templates.
@@ -26,12 +57,7 @@ Ext.define('Limas.PartCategoryEditorWindow', {
 				change: Ext.bind(function (field, enabled) { this.colorField.setDisabled(!enabled); }, this)
 			}
 		});
-		this.colorField = Ext.create('Ext.form.field.Text', {
-			name: 'color',
-			inputType: 'color',
-			width: 65,
-			value: '#d4ad4a'
-		});
+		this.colorField = Ext.create('Limas.ColorInput');
 		this.formPanel.add({
 			xtype: 'fieldcontainer',
 			fieldLabel: i18n('Folder color'),
