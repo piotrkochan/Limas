@@ -25,8 +25,8 @@ final readonly class PartDistributorDataRefresh
 	/** @param list<int> $partIds */
 	public function preview(array $partIds): array
 	{
-		[$rows, , $skipped] = $this->collect($partIds);
-		return ['rows' => $rows, 'skipped' => $skipped];
+		[$rows, , $skipped, $unchanged] = $this->collect($partIds);
+		return ['rows' => $rows, 'unchanged' => $unchanged, 'skipped' => $skipped];
 	}
 
 	/** @param list<int> $partIds
@@ -93,7 +93,7 @@ final readonly class PartDistributorDataRefresh
 		foreach ($this->providers->sourcesWithCapabilities() as $source) {
 			if ($source['configured']) $sources[strtolower($source['name'])] = $source['name'];
 		}
-		$rows = $updates = $skipped = $detailsCache = [];
+		$rows = $updates = $skipped = $unchanged = $detailsCache = [];
 		foreach ($partIds as $partId) {
 			$part = $this->em->find(Part::class, $partId);
 			if (!$part) throw new \InvalidArgumentException('Part ' . $partId . ' no longer exists.');
@@ -121,18 +121,18 @@ final readonly class PartDistributorDataRefresh
 					$skipped[] = ['partId' => $partId, 'distributor' => $label, 'reason' => 'No exact SKU match'];
 					continue;
 				}
-				$this->addChanges($part, $offer, $label, $sku, $details, $rows, $updates);
+				$this->addChanges($part, $offer, $label, $sku, $details, $rows, $updates, $unchanged);
 			}
 			if (!$hasOffers) {
-				$this->discoverOffers($part, $sources, $detailsCache, $rows, $updates, $skipped);
+				$this->discoverOffers($part, $sources, $detailsCache, $rows, $updates, $skipped, $unchanged);
 			}
 		}
-		return [$rows, $updates, $skipped];
+		return [$rows, $updates, $skipped, $unchanged];
 	}
 
 	/** Discover exact MPN matches only. Preview never creates database rows. */
 	private function discoverOffers(Part $part, array $sources, array &$detailsCache,
-		array &$rows, array &$updates, array &$skipped): void
+		array &$rows, array &$updates, array &$skipped, array &$unchanged): void
 	{
 		if ($sources === []) {
 			$skipped[] = ['partId' => $part->getId(), 'distributor' => '', 'reason' => 'No configured providers'];
@@ -143,17 +143,18 @@ final readonly class PartDistributorDataRefresh
 			$mpn = trim((string)$partManufacturer->getPartNumber());
 			if ($mpn === '') continue;
 			$key = mb_strtolower($mpn);
-			$lookups[$key] ??= ['mpn' => $mpn, 'manufacturers' => []];
+			$lookups[$key] ??= ['mpn' => $mpn, 'manufacturers' => [], 'manufacturerLabels' => []];
 			$manufacturer = $partManufacturer->getManufacturer();
 			if ($manufacturer === null) continue;
 			$lookups[$key]['manufacturers'][] = ManufacturerCanonicalizer::normalize((string)$manufacturer->getName());
+			$lookups[$key]['manufacturerLabels'][] = (string)$manufacturer->getName();
 			foreach ($this->em->getRepository(ManufacturerAlias::class)->findBy(['manufacturer' => $manufacturer]) as $alias) {
 				$lookups[$key]['manufacturers'][] = $alias->getAliasNormalized();
 			}
 		}
 		if ($lookups === [] && preg_match('/^\S{2,80}$/u', trim((string)$part->getName()))) {
 			$mpn = trim((string)$part->getName());
-			$lookups[mb_strtolower($mpn)] = ['mpn' => $mpn, 'manufacturers' => []];
+			$lookups[mb_strtolower($mpn)] = ['mpn' => $mpn, 'manufacturers' => [], 'manufacturerLabels' => []];
 		}
 		if ($lookups === []) {
 			$skipped[] = ['partId' => $part->getId(), 'distributor' => '',
@@ -165,6 +166,7 @@ final readonly class PartDistributorDataRefresh
 		foreach ($lookups as $lookup) {
 			$mpn = $lookup['mpn'];
 			$manufacturers = array_unique(array_filter($lookup['manufacturers']));
+			$savedManufacturers = array_values(array_unique($lookup['manufacturerLabels']));
 			try {
 				$results = $this->providers->searchByMpn($mpn, array_values($sources), 10);
 			} catch (\Throwable) {
@@ -175,7 +177,7 @@ final readonly class PartDistributorDataRefresh
 				foreach ($matches as $match) {
 					if (!$match instanceof InfoProviderSearchResult || strcasecmp(trim($match->manufacturerPartNumber), $mpn) !== 0) continue;
 					$sku = trim($match->sourceSku);
-					if ($sku === '' || !$this->manufacturerMatches($match->manufacturerName, $manufacturers)) continue;
+					if ($sku === '') continue;
 					$cacheKey = strtolower($source) . ':' . $sku;
 					if (isset($seen[$cacheKey])) continue;
 					try {
@@ -185,25 +187,27 @@ final readonly class PartDistributorDataRefresh
 						continue;
 					}
 					if (!$details instanceof InfoProviderResult || strcasecmp(trim($details->sourceSku), $sku) !== 0
-						|| strcasecmp(trim($details->manufacturerPartNumber), $mpn) !== 0
-						|| !$this->manufacturerMatches($details->manufacturerName, $manufacturers)) continue;
+						|| strcasecmp(trim($details->manufacturerPartNumber), $mpn) !== 0) continue;
 					$seen[$cacheKey] = true;
 					$data = $this->newOfferData($details);
+					$manufacturerWarning = $manufacturers !== []
+						&& !$this->manufacturerMatches($details->manufacturerName, $manufacturers);
 					$key = $part->getId() . ':0:offer' . substr(hash('sha256', $cacheKey), 0, 16);
 					$rows[] = [
 						'key' => $key, 'partId' => $part->getId(), 'partName' => $part->getName(),
 						'distributor' => $sources[strtolower($source)], 'sku' => $sku,
 						'field' => 'offer', 'label' => 'New offer', 'current' => '',
-						'proposed' => $this->newOfferSummary($data), 'defaultSelected' => false,
-						'fingerprint' => hash('sha256', json_encode($data, JSON_THROW_ON_ERROR))
+						'proposed' => $this->newOfferSummary($data, $manufacturerWarning ? $savedManufacturers : []),
+						'defaultSelected' => false,
+						'fingerprint' => hash('sha256', json_encode([$data, $savedManufacturers], JSON_THROW_ON_ERROR))
 					];
 					$updates[$key] = [$part, 'offer', $data];
 					$this->addDiscoveredPartChange($part, $sources[strtolower($source)], $sku,
 						'Description', 'description', $part->getDescription(), $details->description,
-						$rows, $updates);
+						$rows, $updates, $unchanged);
 					$this->addDiscoveredPartChange($part, $sources[strtolower($source)], $sku,
 						'Catalog package', 'catalogPackage', $part->getCatalogPackage(), $details->packageName,
-						$rows, $updates);
+						$rows, $updates, $unchanged);
 					$found = true;
 				}
 			}
@@ -215,17 +219,23 @@ final readonly class PartDistributorDataRefresh
 	}
 
 	private function addDiscoveredPartChange(Part $part, string $source, string $sku, string $label,
-		string $field, ?string $current, ?string $proposed, array &$rows, array &$updates): void
+		string $field, ?string $current, ?string $proposed,
+		array &$rows, array &$updates, array &$unchanged): void
 	{
-		if ($proposed === null || $proposed === '' || $this->sameValue($field, $current, $proposed)) return;
+		if ($proposed === null || $proposed === '') return;
 		$key = $part->getId() . ':0:' . $field . substr(hash('sha256', strtolower($source) . ':' . $sku), 0, 16);
-		$rows[] = [
+		$row = [
 			'key' => $key, 'partId' => $part->getId(), 'partName' => $part->getName(),
 			'distributor' => $source, 'sku' => $sku, 'field' => $field, 'label' => $label,
 			'current' => $this->display($current), 'proposed' => $this->display($proposed),
 			'defaultSelected' => false,
 			'fingerprint' => hash('sha256', json_encode([$current, $proposed], JSON_THROW_ON_ERROR))
 		];
+		if ($this->sameValue($field, $current, $proposed)) {
+			$unchanged[] = $row;
+			return;
+		}
+		$rows[] = $row;
 		$updates[$key] = [$part, $field, $proposed];
 	}
 
@@ -252,9 +262,13 @@ final readonly class PartDistributorDataRefresh
 		];
 	}
 
-	private function newOfferSummary(array $data): string
+	private function newOfferSummary(array $data, array $differentManufacturers = []): string
 	{
-		$lines = [trim($data['manufacturer'] . ' ' . $data['mpn'])];
+		$lines = [];
+		if ($differentManufacturers !== []) {
+			$lines[] = 'Manufacturer differs from saved: ' . implode(', ', $differentManufacturers);
+		}
+		$lines[] = trim($data['manufacturer'] . ' ' . $data['mpn']);
 		if ($data['description']) $lines[] = $data['description'];
 		if ($data['priceBreaks'] !== []) $lines[] = ($data['currency'] ?: '') . ' ' . $this->display($data['priceBreaks']);
 		if ($data['rohsStatus']) $lines[] = 'RoHS: ' . $data['rohsStatus'];
@@ -308,14 +322,13 @@ final readonly class PartDistributorDataRefresh
 	}
 
 	private function addChanges(Part $part, PartDistributor $offer, string $source, string $sku,
-		InfoProviderResult $details, array &$rows, array &$updates): void
+		InfoProviderResult $details, array &$rows, array &$updates, array &$unchanged): void
 	{
 		$add = function (object $target, string $field, string $label, mixed $current, mixed $proposed,
-			bool $defaultSelected = false) use ($part, $offer, $source, $sku, &$rows, &$updates): void {
-			if ($proposed === null || $proposed === '' || $proposed === []
-				|| $this->sameValue($field, $current, $proposed)) return;
+			bool $defaultSelected = false) use ($part, $offer, $source, $sku, &$rows, &$updates, &$unchanged): void {
+			if ($proposed === null || $proposed === '' || $proposed === []) return;
 			$key = $part->getId() . ':' . $offer->getId() . ':' . $field;
-			$rows[] = [
+			$row = [
 				'key' => $key,
 				'partId' => $part->getId(),
 				'partName' => $part->getName(),
@@ -328,6 +341,11 @@ final readonly class PartDistributorDataRefresh
 				'defaultSelected' => $defaultSelected,
 				'fingerprint' => hash('sha256', json_encode([$current, $proposed], JSON_THROW_ON_ERROR))
 			];
+			if ($this->sameValue($field, $current, $proposed)) {
+				$unchanged[] = $row;
+				return;
+			}
+			$rows[] = $row;
 			$updates[$key] = [$target, $field, $proposed];
 		};
 		$add($part, 'name', 'Name', $part->getName(), $details->manufacturerPartNumber);

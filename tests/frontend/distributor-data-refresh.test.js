@@ -6,11 +6,12 @@ const vm = require('node:vm');
 let dialogClass;
 let request;
 let selected = [];
-let rows = [];
+let previewRows = [];
+let storeIndex = 0;
 const selection = {
   on: () => {},
   select: items => { selected = items; },
-  selectAll: () => { selected = rows; },
+  selectAll: () => { selected = previewRows; },
   deselectAll: () => { selected = []; },
   getSelection: () => selected
 };
@@ -19,9 +20,19 @@ const Ext = {
   bind: (fn, scope) => fn.bind(scope),
   create: (name, config) => {
     if (name === 'Ext.data.Store') {
-      return {loadData: data => { rows = data.map(value => ({get: key => value[key]})); }, getRange: () => rows};
+      const isPreview = storeIndex++ === 0;
+      let rows = [];
+      return {loadData: data => {
+        rows = data.map(value => ({get: key => value[key]}));
+        if (isPreview) previewRows = rows;
+      }, getRange: () => rows};
     }
-    if (name === 'Ext.grid.Panel') return {...config, getSelectionModel: () => selection};
+    if (name === 'Ext.grid.Panel') {
+      const grid = {...config, getSelectionModel: () => selection};
+      grid.setTitle = value => { grid.title = value; };
+      grid.setHidden = value => { grid.hidden = value; };
+      return grid;
+    }
     if (name === 'Ext.button.Button') return {...config, setDisabled: value => { config.disabled = value; }};
     if (name === 'Ext.toolbar.TextItem') return {setText: value => { config.text = value; }};
     return config;
@@ -52,8 +63,11 @@ assert.deepEqual(Array.from(request.jsonData.parts), ['/api/parts/226']);
 request.success.call(dialog, {responseText: JSON.stringify({rows: [
   {key: '226:3:rohsStatus', fingerprint: 'a'.repeat(64), defaultSelected: true},
   {key: '226:3:description', fingerprint: 'b'.repeat(64), defaultSelected: false}
-]})});
+], unchanged: [{partName: 'SR6863D', label: 'Catalog package', current: 'SOT-23'}]})});
 assert.equal(selected.length, 1);
+assert.equal(dialog.unchangedGrid.hidden, false);
+assert.equal(dialog.unchangedStore.getRange().length, 1);
+assert.equal(dialog.unchangedGrid.disableSelection, true);
 dialog.applyChanges();
 assert.equal(request.url, '/api/parts/distributor-data/apply');
 assert.deepEqual(Object.fromEntries(Object.entries(request.jsonData.selected)), {

@@ -4,7 +4,7 @@ Ext.define('Limas.Components.Part.DistributorDataRefreshDialog', {
 	width: 1180,
 	height: 620,
 	modal: true,
-	layout: 'fit',
+	layout: 'border',
 	parts: null,
 	onSuccess: null,
 
@@ -14,11 +14,15 @@ Ext.define('Limas.Components.Part.DistributorDataRefreshDialog', {
 				'current', 'proposed', 'defaultSelected'],
 			data: []
 		});
+		this.unchangedStore = Ext.create('Ext.data.Store', {
+			fields: ['partName', 'distributor', 'sku', 'label', 'current'], data: []
+		});
 		this.previewGrid = Ext.create('Ext.grid.Panel', {
+			region: 'center',
 			store: this.previewStore,
 			selModel: {selType: 'checkboxmodel', mode: 'MULTI', showHeaderCheckbox: true},
 			viewConfig: {enableTextSelection: true, deferEmptyText: false,
-				emptyText: i18n('No distributor data found for selected parts.')},
+				emptyText: i18n('No changes to apply.')},
 			columns: [
 				{text: i18n('Part'), dataIndex: 'partName', width: 175},
 				{text: i18n('Distributor'), dataIndex: 'distributor', width: 115},
@@ -31,12 +35,25 @@ Ext.define('Limas.Components.Part.DistributorDataRefreshDialog', {
 					renderer: this.renderValue}
 			]
 		});
+		this.unchangedGrid = Ext.create('Ext.grid.Panel', {
+			region: 'south', height: 175, split: true, hidden: true,
+			title: i18n('Already up to date'), store: this.unchangedStore,
+			disableSelection: true,
+			viewConfig: {enableTextSelection: true},
+			columns: [
+				{text: i18n('Part'), dataIndex: 'partName', width: 175, renderer: this.renderUnchangedValue},
+				{text: i18n('Distributor'), dataIndex: 'distributor', width: 115, renderer: this.renderUnchangedValue},
+				{text: 'SKU', dataIndex: 'sku', width: 140, renderer: this.renderUnchangedValue},
+				{text: i18n('Field'), dataIndex: 'label', width: 130, renderer: this.renderUnchangedValue},
+				{text: i18n('Value'), dataIndex: 'current', flex: 1, renderer: this.renderUnchangedValue}
+			]
+		});
 		this.statusText = Ext.create('Ext.toolbar.TextItem', {text: ''});
 		this.applyButton = Ext.create('Ext.button.Button', {
 			text: i18n('Apply selected'), disabled: true,
 			handler: Ext.bind(this.applyChanges, this)
 		});
-		this.items = [this.previewGrid];
+		this.items = [this.previewGrid, this.unchangedGrid];
 		this.bbar = [
 			{text: i18n('Select all'), handler: function () { this.previewGrid.getSelectionModel().selectAll(); }, scope: this},
 			{text: i18n('Select none'), handler: function () { this.previewGrid.getSelectionModel().deselectAll(); }, scope: this},
@@ -53,6 +70,9 @@ Ext.define('Limas.Components.Part.DistributorDataRefreshDialog', {
 	renderValue: function (value) {
 		return Ext.htmlEncode(String(value || '')).replace(/\n/g, '<br>');
 	},
+	renderUnchangedValue: function (value) {
+		return '<span style="color:#888">' + Ext.htmlEncode(String(value || '')).replace(/\n/g, '<br>') + '</span>';
+	},
 
 	loadPreview: function () {
 		this.setLoading(i18n('Loading distributor data…'));
@@ -63,9 +83,14 @@ Ext.define('Limas.Components.Part.DistributorDataRefreshDialog', {
 				this.setLoading(false);
 				let result = Ext.decode(response.responseText);
 				this.previewStore.loadData(result.rows || []);
+				let unchanged = result.unchanged || [];
+				this.unchangedStore.loadData(unchanged);
+				this.unchangedGrid.setTitle(i18n('Already up to date') + ' (' + unchanged.length + ')');
+				this.unchangedGrid.setHidden(unchanged.length === 0);
 				let defaults = this.previewStore.getRange().filter(function (row) { return !!row.get('defaultSelected'); });
 				this.previewGrid.getSelectionModel().select(defaults);
 				this.statusText.setText((result.rows || []).length + ' ' + i18n('change(s)')
+					+ ', ' + unchanged.length + ' ' + i18n('already up to date')
 					+ ((result.skipped || []).length ? ', ' + result.skipped.length + ' ' + i18n('skipped') : ''));
 				if (!(result.rows || []).length && (result.skipped || []).length) {
 					Ext.Msg.alert(i18n('Update distributor data'), result.skipped.slice(0, 10).map(function (item) {
