@@ -43,7 +43,8 @@ Ext.define('Limas.ProjectEditor', {
 
 		this.attachmentGrid = Ext.create('Limas.ProjectAttachmentGrid', {
 			title: i18n('Attachments'),
-			iconCls: 'web-icon attach'
+			iconCls: 'web-icon attach',
+			disabled: true
 		});
 		this.attachmentGrid.on('attachmentUploaded', this.onAttachmentUploaded, this);
 
@@ -144,6 +145,7 @@ Ext.define('Limas.ProjectEditor', {
 				this.getForm().loadRecord(freshRecord);
 				this.bindPartsStore(freshRecord.parts());
 				this.attachmentGrid.bindStore(freshRecord.attachments());
+				this.attachmentGrid.setDisabled(false);
 				this.partsSaveButton.hide();
 			}
 		});
@@ -156,6 +158,7 @@ Ext.define('Limas.ProjectEditor', {
 	onEditStart: function () {
 		this.bindPartsStore(this.record.parts());
 		this.attachmentGrid.bindStore(this.record.attachments());
+		this.attachmentGrid.setDisabled(!!this.record.phantom);
 		this.tabPanel.setActiveTab(this.record.phantom ? this.detailsPanel : this.partGrid);
 		this.updateSaveToolbar();
 	}

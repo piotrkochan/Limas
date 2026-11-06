@@ -19,6 +19,7 @@ const Ext = {
     const component = {...config};
     if (name === 'Limas.ProjectPartGrid' || name === 'Limas.ProjectAttachmentGrid') {
       component.bindStore = store => { component.boundStore = store; };
+      component.setDisabled = disabled => { component.disabled = disabled; };
       component.getDockedItems = () => [{add: () => {}}];
       component.on = (event, handler, scope) => { component.listeners = {[event]: handler.bind(scope)}; };
     }
@@ -63,6 +64,7 @@ editorClass.onEditStart.call(editor);
 assert.equal(editor.tabPanel.activeTab, editor.partGrid);
 assert.equal(editor.partGrid.boundStore, projectParts);
 assert.equal(editor.attachmentGrid.boundStore, attachments);
+assert.equal(editor.attachmentGrid.disabled, false);
 assert.equal(editor.footerHidden, true);
 editor.tabPanel.setActiveTab(editor.attachmentGrid);
 editorClass.updateSaveToolbar.call(editor);
@@ -77,6 +79,7 @@ editor.record = {phantom: true, parts: () => projectParts, attachments: () => at
 editorClass.onEditStart.call(editor);
 assert.equal(editor.tabPanel.activeTab, editor.detailsPanel);
 assert.equal(editor.footerHidden, false);
+assert.equal(editor.attachmentGrid.disabled, true);
 
 let uploadSaved = false;
 editor.record = {phantom: false};
@@ -106,6 +109,7 @@ editor.getForm = () => ({loadRecord: record => { editor.formRecord = record; }})
 editorClass._onItemSaved.call(editor, editor.record);
 assert.equal(editor.record, loadedProject);
 assert.equal(editor.attachmentGrid.boundStore, freshAttachments);
+assert.equal(editor.attachmentGrid.disabled, false);
 assert.equal(editor.formRecord, loadedProject);
 
 console.log('Project attachments reload after save and footer appears only in details');
