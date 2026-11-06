@@ -422,14 +422,18 @@ body.limas-theme-dark .limas-lifecycle-discontinued { background: rgba(248, 113,
     border-top: 1px solid #d39a27;
     border-bottom: 1px solid #d39a27;
 }
-.limas-auto-category-summary {
-    margin: 0 12px 8px;
-    padding: 7px 10px;
-    border: 1px solid var(--limas-border-subtle);
-    background: var(--limas-bg-subtle);
-    line-height: 1.5;
-    max-height: 105px;
-    overflow: auto;
+.limas-auto-category-path { color: var(--limas-text-muted); }
+.limas-auto-category-label {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: #dff3e5;
+    color: #17653a;
+    font-weight: 600;
+}
+body.limas-theme-dark .limas-auto-category-label {
+    background: rgba(74, 222, 128, 0.18);
+    color: #86efac;
 }
 .limas-auto-category-new-badge {
     display: inline-block;

@@ -33,10 +33,13 @@ final readonly class AutoCategoryActions
 		}
 		$categories = $this->em->getRepository(PartCategory::class)->findAll();
 		$byId = [];
+		$byParentAndName = [];
 		$categoryData = [];
 		foreach ($categories as $category) {
 			$byId[$category->getId()] = $category;
-			$categoryData[] = ['id' => $category->getId(), 'name' => $category->getName(), 'parentId' => $category->getParent()?->getId()];
+			$parentId = $category->getParent()?->getId();
+			$byParentAndName[($parentId ?? 0) . ':' . mb_strtolower(trim($category->getName()))] = $category;
+			$categoryData[] = ['id' => $category->getId(), 'name' => $category->getName(), 'parentId' => $parentId];
 		}
 		if (!$categoryData) return new JsonResponse(['error' => 'No categories are configured.'], 409);
 		$partData = array_map(static fn(Part $part): array => [
@@ -64,6 +67,14 @@ final readonly class AutoCategoryActions
 			if ($partId === null || $parentId === null || !is_string($name) || !isset($parts[$partId], $byId[$parentId]) || isset($chosen[$partId])) continue;
 			$name = trim($name);
 			if ($name === '' || mb_strlen($name) > 128 || preg_match('/[\r\n<>]/', $name)) continue;
+			$existing = $byParentAndName[$parentId . ':' . mb_strtolower($name)] ?? null;
+			if ($existing !== null) {
+				$chosen[$partId] = [
+					'categoryId' => $existing->getId(),
+					'target' => $existing->getCategoryPath() ?: $existing->getName()
+				];
+				continue;
+			}
 			$chosen[$partId] = [
 				'newCategory' => ['parentId' => $parentId, 'name' => $name],
 				'target' => ($byId[$parentId]->getCategoryPath() ?: $byId[$parentId]->getName()) . ' ➤ ' . $name

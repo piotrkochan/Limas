@@ -18,10 +18,6 @@ Ext.define('Limas.Components.Part.AutoCategoryDialog', {
 			fields: ['partId', 'partName', 'description', 'distributorNumber', 'distributorSource', 'distributorUrl', 'target', 'categoryId', 'newCategory'],
 			data: []
 		});
-		this.suggestionSummary = Ext.create('Ext.Component', {
-			cls: 'limas-auto-category-summary',
-			html: Ext.htmlEncode(i18n('Choose options, then click Preview suggestions.'))
-		});
 		this.previewGrid = Ext.create('Ext.grid.Panel', {
 			flex: 1,
 			store: this.previewStore,
@@ -48,7 +44,7 @@ Ext.define('Limas.Components.Part.AutoCategoryDialog', {
 			disabled: true,
 			handler: Ext.bind(this.applySuggestions, this)
 		});
-		this.items = [this.proposeNew, this.suggestionSummary, this.previewGrid];
+		this.items = [this.proposeNew, this.previewGrid];
 		this.buttons = [
 			{text: i18n('Preview suggestions'), handler: Ext.bind(this.previewSuggestions, this)},
 			this.applyButton,
@@ -58,7 +54,6 @@ Ext.define('Limas.Components.Part.AutoCategoryDialog', {
 		this.proposeNew.on('change', function () {
 			this.previewStore.removeAll();
 			this.applyButton.setDisabled(true);
-			this.suggestionSummary.update(Ext.htmlEncode(i18n('Options changed. Click Preview suggestions.')));
 		}, this);
 	},
 
@@ -79,24 +74,18 @@ Ext.define('Limas.Components.Part.AutoCategoryDialog', {
 	renderSuggestedCategory: function (value, metadata, record) {
 		let target = record.get('target');
 		if (!target) return '<span class="limas-text-muted">' + Ext.htmlEncode(i18n('No suggestion')) + '</span>';
-		let badge = record.get('newCategory')
-			? '<span class="limas-auto-category-new-badge">' + Ext.htmlEncode(i18n('NEW')) + '</span> ' : '';
-		return badge + Ext.htmlEncode(String(target));
-	},
-
-	updateSuggestionSummary: function (rows) {
-		let suggested = rows.filter(function (row) { return !!row.target; });
-		let categoryNames = Array.from(new Set(suggested.map(function (row) { return row.target; })));
-		let newNames = Array.from(new Set(suggested.filter(function (row) { return !!row.newCategory; })
-			.map(function (row) { return row.target; })));
-		let html = '<strong>' + Ext.htmlEncode(i18n('Suggested categories')) + ': '
-			+ suggested.length + ' / ' + rows.length + '</strong>';
-		if (!suggested.length) html += ' — ' + Ext.htmlEncode(i18n('No suggestions returned. Try adding part descriptions or enabling new categories.'));
-		if (categoryNames.length) html += '<br>' + Ext.htmlEncode(i18n('Proposed categories')) + ': '
-			+ categoryNames.map(function (name) { return '<strong>' + Ext.htmlEncode(name) + '</strong>'; }).join(' · ');
-		if (newNames.length) html += '<br>' + Ext.htmlEncode(i18n('New categories')) + ': '
-			+ newNames.map(function (name) { return '<strong>' + Ext.htmlEncode(name) + '</strong>'; }).join(' · ');
-		this.suggestionSummary.update(html);
+		let parts = String(target).split(/\s*➤\s*/).filter(Boolean);
+		if (parts.length > 1 && parts[0] === 'Root Category') parts.shift();
+		let leaf = parts.pop();
+		let parent = parts.join(' › ');
+		let isNew = !!record.get('newCategory');
+		let kind = isNew ? i18n('New category') : i18n('Existing category');
+		let path = parent ? '<span class="limas-auto-category-path">' + Ext.htmlEncode(parent) + ' › </span>' : '';
+		let label = '<span class="limas-auto-category-label" title="' + Ext.htmlEncode(kind)
+			+ '" aria-label="' + Ext.htmlEncode(kind + ': ' + target) + '">' + Ext.htmlEncode(leaf) + '</span>';
+		let badge = isNew ? ' <span class="limas-auto-category-new-badge" title="' + Ext.htmlEncode(i18n('New category'))
+			+ '" aria-label="' + Ext.htmlEncode(i18n('New category')) + '">' + Ext.htmlEncode(i18n('NEW')) + '</span>' : '';
+		return path + label + badge;
 	},
 
 	previewSuggestions: function () {
@@ -104,7 +93,6 @@ Ext.define('Limas.Components.Part.AutoCategoryDialog', {
 		let requestNumber = (this.previewRequestNumber || 0) + 1;
 		this.previewRequestNumber = requestNumber;
 		this.applyButton.setDisabled(true);
-		this.suggestionSummary.update(Ext.htmlEncode(i18n('Asking DeepSeek…')));
 		this.mask(i18n('Asking DeepSeek…'));
 		Ext.Ajax.request({
 			url: Limas.getBasePath() + '/api/parts/autoCategory/preview',
@@ -118,7 +106,6 @@ Ext.define('Limas.Components.Part.AutoCategoryDialog', {
 					return Ext.apply({}, details, row);
 				}, this);
 				this.previewStore.loadData(rows);
-				this.updateSuggestionSummary(rows);
 				let applicable = this.previewStore.getRange().filter(function (record) { return !!record.get('target'); });
 				this.previewGrid.getSelectionModel().select(applicable);
 				this.applyButton.setDisabled(applicable.length === 0);
