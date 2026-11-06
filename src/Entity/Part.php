@@ -289,7 +289,7 @@ class Part
 		return $this;
 	}
 
-	/** @return array<string, array{sku: ?string, orderNumber: ?string, price: ?string, currency: ?string, priceBreaks: array}> */
+	/** @return array<string, array{sku: ?string, orderNumber: ?string, price: ?string, currency: ?string, priceBreaks: array, rohsStatus: ?string, assemblyClass: ?string}> */
 	public function getDistributorNumbers(): array
 	{
 		return $this->distributorNumbers;

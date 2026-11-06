@@ -353,7 +353,9 @@ class PartActions
 					'orderNumber' => $pd->getOrderNumber(),
 					'price' => $pd->getPrice(),
 					'currency' => $pd->getCurrency(),
-					'priceBreaks' => $pd->getPriceBreaks()
+					'priceBreaks' => $pd->getPriceBreaks(),
+					'rohsStatus' => $pd->getRohsStatus(),
+					'assemblyClass' => $pd->getAssemblyClass()
 				];
 			}
 		}

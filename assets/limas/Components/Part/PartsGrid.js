@@ -511,6 +511,18 @@ Ext.define('Limas.PartsGrid', {
 		let suffix = breaks.length && Number(breaks[0].quantity) > 1 ? ' (' + breaks[0].quantity + '+)' : '';
 		return Ext.htmlEncode(display(price) + suffix);
 	},
+	renderDistributorAttribute: function (record, field, labels) {
+		let numbers = record.get('distributorNumbers') || {};
+		let entries = this.getSelectedCatalogEntries(record);
+		return entries.map(function (entry) {
+			let value = numbers[entry.id] && numbers[entry.id][field];
+			if (!value) return '';
+			let label = labels[value] || value;
+			return entries.length > 1
+				? '<div>' + Ext.htmlEncode(entry.name + ': ' + label) + '</div>'
+				: Ext.htmlEncode(label);
+		}).filter(Boolean).join('');
+	},
 
 	_collectIncludeParameters: function () {
 		let names = [];
@@ -631,6 +643,11 @@ Ext.define('Limas.PartsGrid', {
 			let numberIndex = prepared.findIndex(function (column) { return label(column) === numberLabel; });
 			if (priceColumn) prepared.splice(numberIndex >= 0 ? numberIndex + 1 : prepared.length, 0, priceColumn);
 		}
+		[i18n('RoHS'), i18n('Assembly class'), i18n('Catalog package')].forEach(function (name) {
+			if (prepared.some(function (column) { return label(column) === name; })) return;
+			let column = defaults.find(function (candidate) { return label(candidate) === name; });
+			if (column) prepared.push(Object.assign({}, column, {hidden: true}));
+		});
 		return prepared;
 	},
 	defineColumns: function () {
@@ -696,6 +713,25 @@ Ext.define('Limas.PartsGrid', {
 				renderer: function (value, metadata, record) {
 					return grid.renderDistributorPrice(record, metadata);
 				}
+			}, {
+				header: i18n('RoHS'), dataIndex: 'distributorNumbers', hidden: true,
+				minWidth: 110, sortable: false,
+				renderer: function (value, metadata, record) {
+					return grid.renderDistributorAttribute(record, 'rohsStatus', {
+						certified: i18n('Certified'), not_certified: i18n('No certificate')
+					});
+				}
+			}, {
+				header: i18n('Assembly class'), dataIndex: 'distributorNumbers', hidden: true,
+				minWidth: 120, sortable: false,
+				renderer: function (value, metadata, record) {
+					return grid.renderDistributorAttribute(record, 'assemblyClass', {
+						basic: i18n('Basic'), extended: i18n('Extended')
+					});
+				}
+			}, {
+				header: i18n('Catalog package'), dataIndex: 'catalogPackage', hidden: true,
+				minWidth: 130
 			}, {
 				header: i18n('Storage Location'),
 				dataIndex: 'storageLocation.name'

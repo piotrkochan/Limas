@@ -40,7 +40,8 @@ for (const filename of ['PartsGrid.js', 'PartsManager.js', 'Editor/PartDistribut
 const part = {get: key => key === 'distributorNumbers'
   ? {'/api/distributors/30': {
     sku: 'C25862', orderNumber: 'C25862', price: '0.0127', currency: 'USD',
-    priceBreaks: [{quantity: 50, price: '0.01270000'}, {quantity: 500, price: '0.01100000'}]
+    priceBreaks: [{quantity: 50, price: '0.01270000'}, {quantity: 500, price: '0.01100000'}],
+    rohsStatus: 'certified', assemblyClass: 'basic'
   }, '/api/distributors/31': {
     sku: 'SMD0402-10K-1%', price: '0.02', currency: 'EUR', priceBreaks: []
   }} : null};
@@ -69,6 +70,7 @@ const grid = {
   renderDistributorNumber: record => gridClass.renderDistributorNumber.call(grid, record),
   renderDistributorPriceFor: (record, id, metadata) => gridClass.renderDistributorPriceFor.call(grid, record, id, metadata),
   renderDistributorPrice: (record, metadata) => gridClass.renderDistributorPrice.call(grid, record, metadata),
+  renderDistributorAttribute: (record, field, labels) => gridClass.renderDistributorAttribute.call(grid, record, field, labels),
   fitCatalogSelector: () => {}
 };
 assert.equal(grid.getLcscProductUrl(part), 'https://www.lcsc.com/product-detail/C25862.html');
@@ -92,7 +94,13 @@ const presetColumns = gridClass.preparePresetColumns.call(grid, [
   {text: 'Distributor number', dataIndex: 'distributorNumbers'},
   {text: 'Internal ID', dataIndex: '@id'}
 ]);
-assert.deepEqual(presetColumns.map(item => item.text || item.header), ['Distributor number', 'Distributor price']);
+assert.deepEqual(presetColumns.map(item => item.text || item.header),
+  ['Distributor number', 'Distributor price', 'RoHS', 'Assembly class', 'Catalog package']);
+assert.equal(presetColumns[2].hidden, true);
+assert.equal(presetColumns[3].hidden, true);
+assert.equal(presetColumns[4].hidden, true);
+assert.equal(grid.columns.find(item => item.header === 'RoHS').renderer(null, {}, part), 'Certified');
+assert.equal(grid.columns.find(item => item.header === 'Assembly class').renderer(null, {}, part), 'Basic');
 assert.equal(presetColumns[0].renderer('[object Object]', {}, part).includes('C25862'), true);
 assert.equal(presetColumns[1].renderer('[object Object]', {}, part), '0.0127 USD (50+)');
 const column = grid.columns.find(item => item.dataIndex === 'distributorNumbers');

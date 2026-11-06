@@ -34,7 +34,7 @@ final readonly class PartDistributorDataRefreshActions
 			return new JsonResponse(['error' => 'Invalid field selection.'], 400);
 		}
 		foreach ($selected as $key => $fingerprint) {
-			if (!is_string($key) || !preg_match('/^[1-9][0-9]*:[1-9][0-9]*:[a-zA-Z]+$/', $key)
+			if (!is_string($key) || !preg_match('/^[1-9][0-9]*:(?:0|[1-9][0-9]*):[a-zA-Z0-9]+$/', $key)
 				|| !is_string($fingerprint) || !preg_match('/^[a-f0-9]{64}$/', $fingerprint)) {
 				return new JsonResponse(['error' => 'Invalid field selection.'], 400);
 			}

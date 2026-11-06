@@ -17,7 +17,8 @@ Ext.define('Limas.Components.Part.DistributorDataRefreshDialog', {
 		this.previewGrid = Ext.create('Ext.grid.Panel', {
 			store: this.previewStore,
 			selModel: {selType: 'checkboxmodel', mode: 'MULTI', showHeaderCheckbox: true},
-			viewConfig: {enableTextSelection: true},
+			viewConfig: {enableTextSelection: true, deferEmptyText: false,
+				emptyText: i18n('No distributor data found for selected parts.')},
 			columns: [
 				{text: i18n('Part'), dataIndex: 'partName', width: 175},
 				{text: i18n('Distributor'), dataIndex: 'distributor', width: 115},
@@ -66,6 +67,11 @@ Ext.define('Limas.Components.Part.DistributorDataRefreshDialog', {
 				this.previewGrid.getSelectionModel().select(defaults);
 				this.statusText.setText((result.rows || []).length + ' ' + i18n('change(s)')
 					+ ((result.skipped || []).length ? ', ' + result.skipped.length + ' ' + i18n('skipped') : ''));
+				if (!(result.rows || []).length && (result.skipped || []).length) {
+					Ext.Msg.alert(i18n('Update distributor data'), result.skipped.slice(0, 10).map(function (item) {
+						return '#' + Number(item.partId) + ': ' + Ext.htmlEncode(item.reason);
+					}).join('<br>'));
+				}
 			},
 			failure: function (response) { this.showError(response, i18n('Could not load distributor data.')); }
 		});
