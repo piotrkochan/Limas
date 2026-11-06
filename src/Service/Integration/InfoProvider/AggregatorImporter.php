@@ -10,6 +10,7 @@ use Limas\Entity\PartAttachment;
 use Limas\Entity\PartCategory;
 use Limas\Entity\PartDistributor;
 use Limas\Entity\PartManufacturer;
+use Limas\Entity\PartMeasurementUnit;
 use Limas\Entity\PartParameter;
 use Limas\Entity\StorageLocation;
 use Limas\Service\FootprintCanonicalizer;
@@ -86,6 +87,7 @@ final readonly class AggregatorImporter
 		$part->setDescription($candidate->description->chosenValue ?? '');
 		$part->setCategory($category);
 		$part->setStorageLocation($storageLocation);
+		$part->setPartUnit($this->em->getRepository(PartMeasurementUnit::class)->findOneBy(['default' => true]));
 
 		// Footprint resolution — best-effort canonicalisation. The merger's
 		// `packageName.chosenValue` is the winning raw string across sources;

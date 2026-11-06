@@ -12,10 +12,9 @@ Ext.define('Limas.ProjectPartGrid', {
 				minValue: 1
 			},
 			renderer: function (v, m, rec) {
-				if (rec.getPart() !== null) {
-					return v + ' ' + rec.getPart().getPartUnit().get('shortName');
-				}
-				return v;
+				let part = rec.getPart();
+				let unit = part && part.getPartUnit();
+				return v + (unit ? ' ' + unit.get('shortName') : '');
 			}
 		}, {
 			header: i18n('Overage Type'),
@@ -56,9 +55,9 @@ Ext.define('Limas.ProjectPartGrid', {
 				if (rec.get('overageType') === 'percent') {
 					return v + ' %';
 				}
-				if (rec.getPart() !== null) {
-					return v + ' ' + rec.getPart().getPartUnit().get('shortName');
-				}
+				let part = rec.getPart();
+				let unit = part && part.getPartUnit();
+				return v + (unit ? ' ' + unit.get('shortName') : '');
 			}
 		}, {
 			header: i18n('Part'),
