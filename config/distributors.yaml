@@ -26,7 +26,7 @@ parameters:
 
         # TME v2 API.
         tme:
-            country: 'SK' # ISO 3166-1 alpha-2 country code
+            country: 'PL' # ISO 3166-1 alpha-2 country code
 
         # Premier Farnell family — three regional catalogs share one API
         # key (ELEMENT14_KEY); only the `storeId` query parameter differs.
