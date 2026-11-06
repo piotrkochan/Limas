@@ -73,6 +73,33 @@ Ext.define('Limas.ProjectEditor', {
 		});
 		this.items = this.tabPanel;
 		this.callParent();
+		this.partsSaveButton = Ext.create('Ext.button.Button', {
+			text: i18n('Save part changes'),
+			iconCls: 'fugue-icon disk',
+			hidden: true,
+			handler: Ext.bind(this._onItemSave, this)
+		});
+		this.partGrid.getDockedItems('toolbar')[0].add(['->', this.partsSaveButton]);
+		this.tabPanel.on('tabchange', this.updateSaveToolbar, this);
+		this.updateSaveToolbar();
+	},
+	updateSaveToolbar: function () {
+		if (this.bottomToolbar) this.bottomToolbar.setHidden(this.tabPanel.getActiveTab() === this.partGrid);
+	},
+	markPartsDirty: function () {
+		this.partsSaveButton.show();
+	},
+	bindPartsStore: function (store) {
+		if (this.boundPartsStore) {
+			this.boundPartsStore.un('update', this.markPartsDirty, this);
+			this.boundPartsStore.un('add', this.markPartsDirty, this);
+			this.boundPartsStore.un('remove', this.markPartsDirty, this);
+		}
+		this.boundPartsStore = store;
+		this.partGrid.bindStore(store);
+		store.on('update', this.markPartsDirty, this);
+		store.on('add', this.markPartsDirty, this);
+		store.on('remove', this.markPartsDirty, this);
 	},
 	/**
 	 * Handle transparent setting of the part name after a value was selected from the combobox
@@ -99,7 +126,8 @@ Ext.define('Limas.ProjectEditor', {
 	 * Re-bind the store after an item was saved
 	 */
 	_onItemSaved: function (record) {
-		this.partGrid.bindStore(record.parts());
+		this.bindPartsStore(record.parts());
+		this.partsSaveButton.hide();
 		this.attachmentGrid.bindStore(record.attachments());
 	},
 	/**
@@ -108,8 +136,9 @@ Ext.define('Limas.ProjectEditor', {
 	 * @todo This is a hack, because invocation of this method is delayed
 	 */
 	onEditStart: function () {
-		this.partGrid.bindStore(this.record.parts());
+		this.bindPartsStore(this.record.parts());
 		this.attachmentGrid.bindStore(this.record.attachments());
 		this.tabPanel.setActiveTab(this.record.phantom ? this.detailsPanel : this.partGrid);
+		this.updateSaveToolbar();
 	}
 });
