@@ -8,6 +8,7 @@ use ApiPlatform\Metadata\GetCollection;
 use ApiPlatform\Metadata\IriConverterInterface;
 use Doctrine\ORM\EntityManagerInterface;
 use Limas\Entity\Part;
+use Limas\Entity\PartAttachment;
 use Limas\Entity\PartDistributor;
 use Limas\Entity\PartParameter;
 use Limas\Entity\Project;
@@ -227,6 +228,9 @@ class PartActions
 		if ($request->query->getBoolean('includeDistributorNumbers')) {
 			$this->attachDistributorNumbers($parts);
 		}
+		if ($request->query->getBoolean('includeThumbnailImages')) {
+			$this->attachThumbnailImages($parts);
+		}
 
 		return $items;
 	}
@@ -288,6 +292,31 @@ class PartActions
 		}
 		$this->entityManager->flush();
 		return $this->json(['partId' => $id, 'projectId' => $projectId, 'included' => $request->isMethod('PUT')]);
+	}
+
+	/** Populate thumbnail IRIs without loading every Part's attachment collection. */
+	private function attachThumbnailImages(array $parts): void
+	{
+		$byId = [];
+		foreach ($parts as $part) {
+			if ($part->getId() !== null) $byId[$part->getId()] = $part;
+		}
+		if ($byId === []) return;
+		$images = [];
+		$rows = $this->entityManager->createQueryBuilder()
+			->select('a.id AS id, IDENTITY(a.part) AS partId')
+			->from(PartAttachment::class, 'a')
+			->where('IDENTITY(a.part) IN (:ids)')
+			->andWhere('a.isImage = true')
+			->setParameter('ids', array_keys($byId))
+			->orderBy('a.id', 'ASC')
+			->getQuery()->getArrayResult();
+		foreach ($rows as $row) {
+			$images[(int)$row['partId']][] = '/api/part_attachments/' . $row['id'];
+		}
+		foreach ($byId as $id => $part) {
+			$part->setThumbnailImages($images[$id] ?? []);
+		}
 	}
 
 	/** Fetch supplier identifiers and current prices for one list page in a single query. */

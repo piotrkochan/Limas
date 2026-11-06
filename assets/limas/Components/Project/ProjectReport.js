@@ -70,9 +70,9 @@ Ext.define('Limas.ProjectReportView', {
 		this.down('#loadReportButton').on('click', this.onLoadReportClick, this);
 	},
 	onLoadReportClick: function () {
-		this.reportResult.getView().mask(i18n('Loading…'));
 		let selection = this.reportList.getSelection();
 		if (selection.length === 1) {
+			this.reportResult.getView().mask(i18n('Loading…'));
 			this.projectReport = Limas.Entity.Report.load(
 				selection[0].getId(),
 				{
@@ -82,10 +82,13 @@ Ext.define('Limas.ProjectReportView', {
 		}
 	},
 	onCreateReportClick: function () {
-		this.reportResult.getView().mask(i18n('Loading…'));
-		this.reportResult.setProjectsToReport(this.projectList.getProjectsToReport());
-
 		let projectsToReport = this.projectList.getProjectsToReport();
+		if (projectsToReport.length === 0) {
+			Ext.Msg.alert(i18n('Project Report'), i18n('Choose at least one project: click its row or enter a Qty greater than zero.'));
+			return;
+		}
+		this.reportResult.getView().mask(i18n('Loading…'));
+		this.reportResult.setProjectsToReport(projectsToReport);
 
 		this.projectReport = Ext.create('Limas.Entity.Report');
 
@@ -129,6 +132,10 @@ Ext.define('Limas.ProjectReportView', {
 		this.reportResult.reconfigure(this.emptyReportPartStore);
 		this.projectReport.save({
 			success: this.onProjectReportSave,
+			failure: function () {
+				this.reportResult.getView().unmask();
+				Ext.Msg.alert(i18n('Project Report'), i18n('Could not save the report.'));
+			},
 			scope: this
 		});
 	},

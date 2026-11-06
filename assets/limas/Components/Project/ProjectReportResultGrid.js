@@ -8,7 +8,9 @@ Ext.define('Limas.Components.Project.ProjectReportResultGrid', {
 	],
 
 	viewConfig: {
-		markDirty: false
+		markDirty: false,
+		deferEmptyText: false,
+		emptyText: i18n('No parts in this report.')
 	},
 
 	initComponent: function () {

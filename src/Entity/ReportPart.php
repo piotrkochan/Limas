@@ -33,24 +33,24 @@ class ReportPart
 {
 	#[ORM\ManyToOne(targetEntity: Report::class, inversedBy: 'reportParts')]
 	#[Groups(['default'])]
-	private ?Report $report;
+	private ?Report $report = null;
 	#[ORM\ManyToOne(targetEntity: Part::class)]
 	#[Groups(['default'])]
-	private ?Part $part;
+	private ?Part $part = null;
 	#[ORM\Column(type: Types::INTEGER, nullable: false)]
 	#[Groups(['default'])]
-	private int $quantity;
+	private int $quantity = 0;
 	#[ORM\ManyToOne(targetEntity: Distributor::class)]
 	#[Groups(['default'])]
-	private ?Distributor $distributor;
+	private ?Distributor $distributor = null;
 	#[Groups(['default'])]
-	private string $distributorOrderNumber;
+	private string $distributorOrderNumber = '';
 	#[Groups(['default'])]
-	private string $itemPrice;
+	private string $itemPrice = '0';
 	#[Groups(['default'])]
-	private string $orderSum;
+	private string $orderSum = '0';
 	#[Groups(['default'])]
-	private bool $metaPart;
+	private bool $metaPart = false;
 	#[VirtualOneToMany(target: Part::class)]
 	#[Groups(['default'])]
 	private Collection $subParts;
@@ -58,13 +58,14 @@ class ReportPart
 	#[Groups(['default'])]
 	private Collection $projectParts;
 	#[Groups(['default'])]
-	private string $itemSum;
+	private string $itemSum = '0';
 	#[Groups(['default'])]
-	private int $missing;
+	private int $missing = 0;
 
 
 	public function __construct()
 	{
+		$this->subParts = new ArrayCollection;
 		$this->projectParts = new ArrayCollection;
 	}
 

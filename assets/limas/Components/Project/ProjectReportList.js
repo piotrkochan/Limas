@@ -6,6 +6,7 @@ Ext.define('Limas.Components.Project.ProjectReportList', {
 		{
 			header: i18n('Qty'), dataIndex: 'quantity',
 			width: 50,
+			tooltip: i18n('Number of boards to build; click a project row to select one board'),
 			editor: {
 				xtype: 'numberfield',
 				minValue: 0
@@ -40,6 +41,9 @@ Ext.define('Limas.Components.Project.ProjectReportList', {
 		this.plugins = [this.cellEditingPlugin];
 
 		this.callParent(arguments);
+		this.on('itemclick', function (view, record) {
+			if (record.get('quantity') <= 0) record.set('quantity', 1);
+		});
 	},
 	createStore: function () {
 		this.store = Ext.create('Ext.data.Store', {

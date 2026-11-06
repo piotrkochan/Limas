@@ -181,22 +181,11 @@ Ext.define('Limas.PartManager', {
 		this.grid.store.on('load', function () {
 			this.thumbnailView.getStore().removeAll();
 
-			let data = this.grid.store.getData(),
-				j, attachments, attachment;
-
-			for (let i = 0; i < data.getCount(); i++) {
-				attachments = data.getAt(i).attachments().getData();
-
-				for (j = 0; j < attachments.getCount(); j++) {
-					attachment = attachments.getAt(j);
-					if (attachment.get("isImage")) {
-						this.thumbnailView.getStore().add({
-							'@id': attachment.get('@id'),
-							'part': data.getAt(i)
-						});
-					}
-				}
-			}
+			this.grid.store.each(function (part) {
+				(part.get('thumbnailImages') || []).forEach(function (iri) {
+					this.thumbnailView.getStore().add({'@id': iri, 'part': part});
+				}, this);
+			}, this);
 
 			let t = new Ext.Template(i18n('Displaying {0} image(s) from {1} part(s)')),
 				q = t.apply([this.thumbnailView.getStore().getCount(), this.grid.store.getCount()]);
@@ -828,6 +817,8 @@ Ext.define('Limas.PartManager', {
 	},
 	createStore: function (config) {
 		this.store = Ext.create('Limas.Data.Store.PartStore', {autoLoad: false});
+		this.store.getProxy().extraParams = this.store.getProxy().extraParams || {};
+		this.store.getProxy().extraParams.includeThumbnailImages = 1;
 		let proxy = this.store.getProxy();
 		proxy.extraParams = proxy.extraParams || {};
 		proxy.extraParams.includeDistributorNumbers = 1;

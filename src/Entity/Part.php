@@ -216,6 +216,10 @@ class Part
 	#[VirtualField(type: 'auto')]
 	#[Groups(['readonly'])]
 	private array $projectIds = [];
+	/** @var list<string> Image attachment IRIs for the current list page. */
+	#[VirtualField(type: 'auto')]
+	#[Groups(['readonly'])]
+	private array $thumbnailImages = [];
 	/**
 	 * Flat category path, surfaced as an ExtJS model field so the parts grid
 	 * can group rows by category client-side. The grid's groupField needs a
@@ -308,6 +312,19 @@ class Part
 	public function setProjectIds(array $projectIds): self
 	{
 		$this->projectIds = $projectIds;
+		return $this;
+	}
+
+	/** @return list<string> */
+	public function getThumbnailImages(): array
+	{
+		return $this->thumbnailImages;
+	}
+
+	/** @param list<string> $images */
+	public function setThumbnailImages(array $images): self
+	{
+		$this->thumbnailImages = $images;
 		return $this;
 	}
 

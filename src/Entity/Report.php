@@ -39,7 +39,7 @@ class Report
 {
 	#[ORM\Column(type: Types::STRING, nullable: true)]
 	#[Groups(['default'])]
-	private ?string $name;
+	private ?string $name = null;
 	#[ORM\Column(type: Types::DATETIME_MUTABLE)]
 	#[Groups(['default'])]
 	private \DateTimeInterface $createDateTime;

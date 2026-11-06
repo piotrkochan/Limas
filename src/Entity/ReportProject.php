@@ -30,15 +30,15 @@ class ReportProject
 	extends BaseEntity
 {
 	#[ORM\ManyToOne(targetEntity: Report::class, inversedBy: 'reportProjects')]
-	private ?Report $report;
+	private ?Report $report = null;
 	#[ORM\ManyToOne(targetEntity: Project::class)]
 	#[ORM\JoinColumn(onDelete: 'CASCADE')]
 	#[Groups(['default'])]
 	#[Assert\NotNull]
-	private ?Project $project;
+	private ?Project $project = null;
 	#[ORM\Column(type: Types::INTEGER)]
 	#[Groups(['default'])]
-	private int $quantity;
+	private int $quantity = 0;
 
 
 	public function getReport(): ?Report

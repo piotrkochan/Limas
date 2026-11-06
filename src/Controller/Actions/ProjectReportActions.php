@@ -11,6 +11,7 @@ use Limas\Service\PartService;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\HttpKernel\Attribute\AsController;
 use Symfony\Component\Serializer\Normalizer\NormalizerInterface;
 use Symfony\Component\Serializer\SerializerInterface;
@@ -35,6 +36,14 @@ class ProjectReportActions
 
 	public function createReportAction(Report $data): JsonResponse
 	{
+		if ($data->getReportProjects()->isEmpty()) {
+			throw new BadRequestHttpException('Choose at least one project for the report');
+		}
+		foreach ($data->getReportProjects() as $reportProject) {
+			if ($reportProject->getProject() === null || $reportProject->getQuantity() < 1) {
+				throw new BadRequestHttpException('Each report project needs a positive build quantity');
+			}
+		}
 		// Prime each project's parts collection AND its Part in one query, so
 		// the nested loop below doesn't lazy-load the collection per project
 		// and the Part per project-part (N+1 across the whole report)
