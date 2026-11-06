@@ -22,6 +22,10 @@ Ext.define('Limas.Components.Part.BulkActionsButton', {
 					text: i18n('Move to storage location…'),
 					iconCls: 'fugue-icon truck',
 					handler: Ext.bind(this.onMoveClick, this)
+				}, {
+					text: i18n('Auto category…'),
+					iconCls: 'web-icon folder',
+					handler: Ext.bind(this.onAutoCategoryClick, this)
 				}
 			]
 		});
@@ -61,6 +65,26 @@ Ext.define('Limas.Components.Part.BulkActionsButton', {
 			onSuccess: Ext.bind(function () {
 				if (this.grid && this.grid.store) {
 					this.grid.store.reload();
+				}
+			}, this)
+		}).show();
+	},
+
+	onAutoCategoryClick: function () {
+		let iris = this.getSelectedIris();
+		if (!iris.length) return;
+		if (iris.length > 40) {
+			Ext.Msg.alert(i18n('Auto category'), i18n('Select at most 40 parts per batch.'));
+			return;
+		}
+		Ext.create('Limas.Components.Part.AutoCategoryDialog', {
+			parts: iris,
+			onSuccess: Ext.bind(function (result) {
+				if (this.grid && this.grid.store) this.grid.store.reload();
+				let manager = Ext.getCmp('limas-partmanager');
+				if (manager && manager.tree) {
+					if ((result.createdCategories || []).length) manager.tree.getStore().load();
+					else manager.refreshCategoryCounts();
 				}
 			}, this)
 		}).show();
