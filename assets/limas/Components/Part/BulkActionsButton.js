@@ -79,9 +79,12 @@ Ext.define('Limas.Components.Part.BulkActionsButton', {
 		}
 		let partDetails = {};
 		this.grid.getSelectionModel().getSelection().forEach(function (part) {
+			let distributor = this.grid.getDistributorNumberInfo(part) || {};
 			partDetails[part.get('@id')] = {
 				description: part.get('description') || '',
-				distributorNumber: this.grid.renderDistributorNumber(part)
+				distributorNumber: distributor.number || '',
+				distributorSource: distributor.source || '',
+				distributorUrl: distributor.url || ''
 			};
 		}, this);
 		Ext.create('Limas.Components.Part.AutoCategoryDialog', {

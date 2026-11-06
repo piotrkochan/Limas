@@ -34,9 +34,12 @@ const grid = {
   selectedDistributorId: '/api/distributors/30',
   selectedDistributorName: 'lcsc',
   selectedDistributorField: 'sku',
-  getLcscProductUrl: record => gridClass.getLcscProductUrl.call(grid, record)
+  getLcscProductUrl: record => gridClass.getLcscProductUrl.call(grid, record),
+  getDistributorNumberInfo: record => gridClass.getDistributorNumberInfo.call(grid, record),
+  renderDistributorNumber: record => gridClass.renderDistributorNumber.call(grid, record)
 };
 assert.equal(grid.getLcscProductUrl(part), 'https://www.lcsc.com/product-detail/C25862.html');
+assert.equal(grid.getDistributorNumberInfo(part).number, 'C25862');
 gridClass.defineColumns.call(grid);
 const column = grid.columns.find(item => item.dataIndex === 'distributorNumbers');
 const cell = column.renderer('[object Object]', {}, part);

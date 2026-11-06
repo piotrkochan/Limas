@@ -364,20 +364,29 @@ Ext.define('Limas.PartsGrid', {
 		return /^C[1-9][0-9]*$/i.test(String(code || ''))
 			? 'https://www.lcsc.com/product-detail/' + String(code).toUpperCase() + '.html' : null;
 	},
-	renderDistributorNumber: function (record) {
+	getDistributorNumberInfo: function (record) {
 		let numbers = record.get('distributorNumbers') || {};
 		let identifiers = numbers[this.selectedDistributorId];
 		let number = identifiers && identifiers[this.selectedDistributorField];
-		if (!number) return '';
+		if (!number) return null;
 		let source = this.selectedDistributorName || '';
+		return {
+			number: String(number),
+			source: source,
+			url: source === 'lcsc' ? this.getLcscProductUrl(record) : null
+		};
+	},
+	renderDistributorNumber: function (record) {
+		let info = this.getDistributorNumberInfo(record);
+		if (!info) return '';
+		let source = info.source;
 		let hasSprite = Ext.Array.contains(
 			['avnet', 'mouser', 'digikey', 'element14', 'farnell', 'lcsc', 'newark', 'oemsecrets', 'rs', 'tme'], source);
 		let icon = hasSprite
 			? '<i class="distributor-icon ' + source + '" style="margin-right:6px;"></i>'
 			: '<i class="web-icon lorry" style="margin-right:6px;"></i>';
-		let content = icon + Ext.htmlEncode(String(number));
-		let url = source === 'lcsc' ? this.getLcscProductUrl(record) : null;
-		return url ? '<a href="' + Ext.htmlEncode(url) + '" target="_blank" rel="noopener noreferrer">' + content + '</a>' : content;
+		let content = icon + Ext.htmlEncode(info.number);
+		return info.url ? '<a href="' + Ext.htmlEncode(info.url) + '" target="_blank" rel="noopener noreferrer">' + content + '</a>' : content;
 	},
 
 	_collectIncludeParameters: function () {

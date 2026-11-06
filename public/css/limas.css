@@ -422,6 +422,15 @@ body.limas-theme-dark .limas-lifecycle-discontinued { background: rgba(248, 113,
     border-top: 1px solid #d39a27;
     border-bottom: 1px solid #d39a27;
 }
+.limas-auto-category-summary {
+    margin: 0 12px 8px;
+    padding: 7px 10px;
+    border: 1px solid var(--limas-border-subtle);
+    background: var(--limas-bg-subtle);
+    line-height: 1.5;
+    max-height: 105px;
+    overflow: auto;
+}
 .limas-auto-category-new-badge {
     display: inline-block;
     padding: 1px 6px;
