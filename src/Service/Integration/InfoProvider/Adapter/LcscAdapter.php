@@ -16,9 +16,9 @@ use Limas\Service\Integration\InfoProvider\ProviderCapability;
  * Adapts LCSC / JLCPCB catalog data into InfoProviderResult
  *
  * Two-phase shape:
- *  - Phase 1 (`searchByMpnAsync`) hits **jlcsearch**, which returns one row
- *    per part variant carrying just `{lcsc, mfr, package, is_basic, stock,
- *    price}`. The MFR field is the manufacturer PART NUMBER, NOT the
+ *  - Phase 1 (`searchByMpnAsync`) hits LCSC's own product list. The light
+ *    row carries the product code, MPN, package, description, and stock.
+ *    The MFR field is the manufacturer PART NUMBER, NOT the
  *    manufacturer name — that and the rest of the parametric data come
  *    from Phase 2.
  *
@@ -97,7 +97,7 @@ final class LcscAdapter
 
 	public function searchByMpnAsync(string $mpn, int $limit = 10): array
 	{
-		// Phase 1 is JUST the jlcsearch keyword call here. We fan out the
+		// Phase 1 is the LCSC catalog list call. We fan out the
 		// per-LCSC-code wmsc lookups inside `mapSearchByMpnResponses` —
 		// after the search has resolved we know which codes to ask for,
 		// and curl_multi lets us fire them all in parallel.
@@ -115,7 +115,7 @@ final class LcscAdapter
 			return [];
 		}
 
-		// Enrichment fan-out: jlcsearch's light row has the MPN but NOT
+		// Enrichment fan-out: the normalized light row has the MPN but NOT
 		// the manufacturer name. The merger's groupKey() drops rows
 		// with empty `manufacturerName` (it can't form a canonical key
 		// without one), so we'd lose every LCSC result through grouping
@@ -205,7 +205,7 @@ final class LcscAdapter
 
 	public function searchExactByMpnAsync(string $mpn): array
 	{
-		// jlcsearch is keyword-fuzzy ("1N4148" returns 1N4148WS, 1N4148WT
+		// LCSC's list search is keyword-fuzzy ("1N4148" returns 1N4148WS, 1N4148WT
 		// variants too). For the strict completion-pattern lookup we run
 		// the same call and filter mfr === mpn in the mapper.
 		return ['exact' => $this->service->searchAsync($mpn, 50)];
@@ -261,7 +261,7 @@ final class LcscAdapter
 		$lcscCode = $this->lcscCode($c);
 		$desc = $this->trimOrNull($c['description'] ?? null);
 		$mfrName = $detail !== null ? ($this->trimOrNull($detail['brandNameEn'] ?? null) ?? '') : '';
-		// jlcsearch's description is often empty — fall back to wmsc's
+		// List descriptions can be empty — fall back to wmsc's
 		// productDescEn when available so the candidate row in the UI
 		// shows something useful even before Phase-2 detail merge.
 		if ($desc === null && $detail !== null) {
@@ -391,7 +391,7 @@ final class LcscAdapter
 	}
 
 	/**
-	 * jlcsearch returns `lcsc` as the numeric ID without the "C" prefix.
+	 * The service normalizes `lcsc` to the numeric ID without the "C" prefix.
 	 * Restore the prefix so it matches LCSC's catalog UI + can drive
 	 * wmsc's `productCode` query in Phase 2.
 	 */

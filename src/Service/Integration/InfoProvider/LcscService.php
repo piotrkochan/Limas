@@ -11,10 +11,8 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
 
 /**
  * Thin client over LCSC's data, hit via two unauthenticated endpoints:
- *  - **jlcsearch** (`https://jlcsearch.tscircuit.com/api/search`) — community
- *    proxy that does keyword/MPN search across LCSC's catalog. Returns a
- *    light row per part variant: `{lcsc, mfr, package, is_basic, is_preferred,
- *    description, stock, price}`. Used for Phase-1 search. No key required.
+ *  - **wmsc.lcsc.com** (`https://wmsc.lcsc.com/ftps/wm/product/query/list`) —
+ *    LCSC's public catalog list, queried by keyword/MPN for Phase-1 search.
  *  - **wmsc.lcsc.com** (`https://wmsc.lcsc.com/ftps/wm/product/detail`) —
  *    LCSC's own unauthenticated product-detail endpoint, lookup by
  *    `productCode` (the Cxxxxx code). Returns FULL data: price ladder,
@@ -23,7 +21,7 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
  *
  * Why this approach instead of LCSC's official IPS API (`ips.lcsc.com`):
  * the official API requires per-customer approval + IP whitelisting + signature
- * authentication. The two endpoints above ship LCSC data without any of that,
+ * authentication. These public endpoints ship LCSC data without any of that,
  * which makes the LCSC source available out-of-the-box once env vars are set
  * to anything non-empty.
  *
@@ -34,7 +32,7 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
  */
 class LcscService
 {
-	private const string JLCSEARCH_ENDPOINT = 'https://jlcsearch.tscircuit.com/api/search';
+	private const string WMSC_SEARCH_ENDPOINT = 'https://wmsc.lcsc.com/ftps/wm/product/query/list';
 	private const string WMSC_DETAIL_ENDPOINT = 'https://wmsc.lcsc.com/ftps/wm/product/detail';
 
 
@@ -52,21 +50,19 @@ class LcscService
 	}
 
 	/**
-	 * Phase-1 async dispatch. `limit` caps jlcsearch's result list — they
-	 * default to 100 but our adapter rarely needs more than 20 candidates
-	 * after group-by-canonical.
+	 * Phase-1 async dispatch. The old JLC search index misses products that
+	 * LCSC itself lists, so search the LCSC catalog directly.
 	 */
 	public function searchAsync(string $query, int $limit = 20): ResponseInterface
 	{
-		return $this->httpClient->request('GET', self::JLCSEARCH_ENDPOINT, [
-			'query' => [
-				'q' => $query,
-				'limit' => $limit
+		return $this->httpClient->request('POST', self::WMSC_SEARCH_ENDPOINT, [
+			'json' => [
+				'keyword' => $query,
+				'currentPage' => 1,
+				'pageSize' => max(1, min($limit, 100))
 			],
 			'headers' => [
 				'Accept' => 'application/json',
-				// jlcsearch sometimes rate-limits empty UA strings — pick a
-				// sensible default that doesn't pretend to be a browser.
 				'User-Agent' => 'Limas-Aggregator/1.0 (+https://github.com/Lopo/Limas)'
 			],
 			'timeout' => 15
@@ -94,10 +90,7 @@ class LcscService
 	}
 
 	/**
-	 * Await + decode + cache the jlcsearch search response. The adapter
-	 * uses this to drive Phase-1 mapping; we don't pre-warm a per-product
-	 * cache here because jlcsearch's per-row data is too sparse to be
-	 * useful as a stand-in for Phase-2 detail.
+	 * Normalize LCSC's list rows to the adapter's light search shape.
 	 *
 	 * @return array{components: array<int, array<string, mixed>>}
 	 */
@@ -108,11 +101,24 @@ class LcscService
 		} catch (\Throwable) {
 			return ['components' => []];
 		}
-		// Guard against unexpected response shapes (e.g. HTML error pages).
-		if (!isset($data['components']) || !is_array($data['components'])) {
+		$rows = $data['result']['dataList'] ?? null;
+		if (($data['ok'] ?? true) === false || !is_array($rows)) {
 			return ['components' => []];
 		}
-		return $data;
+		$components = [];
+		foreach ($rows as $row) {
+			if (!is_array($row)) continue;
+			$code = strtoupper((string)($row['productCode'] ?? ''));
+			if (!preg_match('/^C[1-9][0-9]*$/', $code)) continue;
+			$components[] = [
+				'lcsc' => substr($code, 1),
+				'mfr' => (string)($row['productModel'] ?? ''),
+				'package' => $row['encapStandard'] ?? null,
+				'description' => $row['productIntroEn'] ?? ($row['productDescEn'] ?? null),
+				'stock' => $row['stockNumber'] ?? null
+			];
+		}
+		return ['components' => $components];
 	}
 
 	/**
