@@ -15,6 +15,7 @@ Ext.define('Limas.ModelTreeMaker.ModelTreeMaker', {
 
 	constructor: function () {
 		this.visitedModels = [];
+		this.ignoreFields = [];
 	},
 
 	/**
@@ -51,7 +52,10 @@ Ext.define('Limas.ModelTreeMaker.ModelTreeMaker', {
 		this.visitedModels.push(model.getName());
 
 		for (i = 0; i < fields.length; i++) {
-			if (fields[i]['reference'] === null) {
+			if (fields[i].persist === false) {
+				continue;
+			}
+			if (!fields[i].reference) {
 				// Field is a scalar field
 				if (this.ignoreFields.indexOf(fields[i].name) === -1 && !this.customFieldIgnorer(fields[i])) {
 					newNode = node.appendChild(Ext.create('Limas.Data.ReflectionFieldTreeModel', {
@@ -70,9 +74,13 @@ Ext.define('Limas.ModelTreeMaker.ModelTreeMaker', {
 				}
 			} else {
 				// Field is an association; recurse into associations
+				let refCls = fields[i].reference.cls;
+				if (!refCls) {
+					continue;
+				}
 				associationAlreadyProcessed = false;
 				for (j = 0; j < this.visitedModels.length; j++) {
-					if (this.visitedModels[j] === fields[i].reference.cls.getName()) {
+					if (this.visitedModels[j] === refCls.getName()) {
 						// The association was already processed; skip return
 						associationAlreadyProcessed = true;
 					}
@@ -92,12 +100,12 @@ Ext.define('Limas.ModelTreeMaker.ModelTreeMaker', {
 						childNode.set(callback(fields[i], childNode));
 					}
 
-					this.make(childNode, fields[i].reference.cls, prefix + fields[i].name + '.', callback);
+					this.make(childNode, refCls, prefix + fields[i].name + '.', callback);
 				}
 			}
 		}
 
-		let associations = model.associations;
+		let associations = model.associations || {};
 		for (i in associations) {
 			associationAlreadyProcessed = false;
 			if (typeof (associations[i].storeName) !== 'undefined' && associations[i].isMany === true) {
@@ -107,7 +115,7 @@ Ext.define('Limas.ModelTreeMaker.ModelTreeMaker', {
 					}
 				}
 
-				if (!associationAlreadyProcessed) {
+				if (!associationAlreadyProcessed && associations[i].cls) {
 					childNode = node.appendChild(Ext.create('Limas.Data.ReflectionFieldTreeModel', {
 						text: associations[i].role,
 						data: {
