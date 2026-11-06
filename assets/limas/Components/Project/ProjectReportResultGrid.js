@@ -96,19 +96,15 @@ Ext.define('Limas.Components.Project.ProjectReportResultGrid', {
 				}
 			}, {
 				header: i18n('Item Price'),
-				dataIndex: 'part.averagePrice',
-				renderers: [{
-					rtype: 'currency'
-				}],
+				dataIndex: 'itemPrice',
+				renderer: this.renderReportCurrency,
 				width: 100
 			}, {
 				header: i18n('Sum'),
 				dataIndex: 'itemSum',
-				renderers: [{
-					rtype: 'currency'
-				}],
+				renderer: this.renderReportCurrency,
 				summaryType: 'sum',
-				summaryRenderer: Limas.getApplication().formatCurrency,
+				summaryRenderer: this.renderReportCurrency,
 				width: 100
 			}, {
 				header: i18n('Order Amount'),
@@ -124,11 +120,9 @@ Ext.define('Limas.Components.Project.ProjectReportResultGrid', {
 			}, {
 				header: i18n('Sum (Order)'),
 				dataIndex: 'orderSum',
-				renderers: [{
-					rtype: 'currency'
-				}],
+				renderer: this.renderReportCurrency,
 				summaryType: 'sum',
-				summaryRenderer: Limas.getApplication().formatCurrency,
+				summaryRenderer: this.renderReportCurrency,
 				width: 100
 			}
 		];
@@ -215,6 +209,24 @@ Ext.define('Limas.Components.Project.ProjectReportResultGrid', {
 		];
 
 		this.callParent(arguments);
+	},
+	renderReportCurrency: function (value) {
+		return value === null || value === undefined ? '—'
+			: Limas.getApplication().formatCurrency(value, Limas.getApplication().getDisplayCurrency());
+	},
+	recalculateCurrency: function () {
+		this.getStore().each(function (record) {
+			let distributor = record.getDistributor && record.getDistributor();
+			let part = record.getPart && record.getPart();
+			if (!distributor || !part || !part.distributors) return;
+			part.distributors().each(function (offer) {
+				if (offer.getDistributor().getId() === distributor.getId()) {
+					if (this.applyOrderSizing(record, offer)) {
+						record.set('itemSum', record.get('quantity') * record.get('itemPrice'));
+					}
+				}
+			}, this);
+		}, this);
 	},
 	/**
 	 * Called when the distributor field is about to be edited
@@ -349,8 +361,9 @@ Ext.define('Limas.Components.Project.ProjectReportResultGrid', {
 				if (partDistributors.getAt(i).getDistributor().getId() === context.record.getDistributor().getId()) {
 					let pd = partDistributors.getAt(i);
 					context.record.set('distributorOrderNumber', pd.get('orderNumber'));
-					this.applyOrderSizing(context.record, pd);
-					context.record.set('itemSum', context.record.get('quantity') * context.record.get('itemPrice'));
+					if (this.applyOrderSizing(context.record, pd)) {
+						context.record.set('itemSum', context.record.get('quantity') * context.record.get('itemPrice'));
+					}
 				}
 			}
 		}
@@ -365,9 +378,18 @@ Ext.define('Limas.Components.Project.ProjectReportResultGrid', {
 		let needed = Math.max(0, parseInt(record.get('missing'), 10) || 0);
 		let orderAmount = this.getOrderAmount(partDistributor, needed);
 		let price = this.getUnitPriceForQuantity(partDistributor, Math.max(1, orderAmount));
-		record.set('itemPrice', price || 0);
+		let converted = Limas.getApplication().convertCurrency(price, partDistributor.get('currency') || 'EUR');
+		if (converted === null) {
+			record.set('itemPrice', null);
+			record.set('itemSum', null);
+			record.set('orderSum', null);
+			record.set('orderAmount', orderAmount);
+			return false;
+		}
+		record.set('itemPrice', converted);
 		record.set('orderAmount', orderAmount);
-		record.set('orderSum', orderAmount * (price || 0));
+		record.set('orderSum', orderAmount * converted);
+		return true;
 	},
 	getOrderAmount: function (partDistributor, needed) {
 		if (needed <= 0) return 0;
@@ -434,8 +456,9 @@ Ext.define('Limas.Components.Project.ProjectReportResultGrid', {
 		if (cheapestDistributor !== null) {
 			projectPart.setDistributor(cheapestDistributor.getDistributor());
 			projectPart.set('distributorOrderNumber', cheapestDistributor.get('orderNumber'));
-			this.applyOrderSizing(projectPart, cheapestDistributor);
-			projectPart.set('itemSum', projectPart.get('quantity') * projectPart.get('itemPrice'));
+			if (this.applyOrderSizing(projectPart, cheapestDistributor)) {
+				projectPart.set('itemSum', projectPart.get('quantity') * projectPart.get('itemPrice'));
+			}
 		}
 	},
 	/**
@@ -463,7 +486,9 @@ Ext.define('Limas.Components.Project.ProjectReportResultGrid', {
 			let unitsToBuy = this.getOrderAmount(activeDistributor, needed);
 			let price = this.getUnitPriceForQuantity(activeDistributor, unitsToBuy);
 			if (!(price > 0)) continue;
-			let cost = unitsToBuy * price;
+			let converted = Limas.getApplication().convertCurrency(price, activeDistributor.get('currency') || 'EUR');
+			if (converted === null) continue;
+			let cost = unitsToBuy * converted;
 
 			if (firstPositive || cost < lowestCost) {
 				lowestCost = cost;

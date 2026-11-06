@@ -1223,8 +1223,11 @@ Ext.define('Limas.Components.InfoProviderAggregator.SearchPanel', {
 		let html = this.renderConflictsSection(row);
 		let fmtPrice = (p, currency) => {
 			if (p === null || p === undefined) return '—';
-			let s = (Math.abs(p) < 0.01 ? p.toExponential(2) : p.toFixed(4)).replace(/\.?0+$/, '');
-			return s + (currency ? ' ' + Ext.htmlEncode(currency) : '');
+			let converted = Limas.getApplication().convertCurrency(p, currency || 'EUR');
+			let shown = converted === null ? Number(p) : converted;
+			let code = converted === null ? (currency || 'EUR') : Limas.getApplication().getDisplayCurrency();
+			let s = (Math.abs(shown) < 0.01 ? shown.toExponential(2) : shown.toFixed(4)).replace(/\.?0+$/, '');
+			return s + ' ' + Ext.htmlEncode(code);
 		};
 		let fmtStock = s => (s === null || s === undefined) ? '—' : Ext.util.Format.number(s, '0,000');
 		Ext.Object.each(providerSpecific, (source, info) => {

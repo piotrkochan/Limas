@@ -132,6 +132,7 @@ Ext.application({
 		}).records);
 
 		let preferredTheme = this.getUserPreference('limas.user.theme', null);
+		this.loadExchangeRates();
 
 		this.createPartManager();
 		if (!this.routeListenersInstalled) {
@@ -669,28 +670,74 @@ Ext.application({
 	getUsername: function () {
 		return this.username;
 	},
+	isAdmin: function () {
+		let provider = this.getLoginManager() && this.getLoginManager().provider;
+		let roles = provider && provider.token && provider.token.payload && provider.token.payload.roles;
+		if (Ext.isArray(roles)) return roles.indexOf('ROLE_ADMIN') !== -1 || roles.indexOf('ROLE_SUPER_ADMIN') !== -1;
+		let user = this.getLoginManager() && this.getLoginManager().getUser();
+		return !!(user && (user.get('admin') || user.get('isAdmin')));
+	},
+	getDisplayCurrency: function () {
+		return this.getUserPreference('limas.formatting.currency.code', 'EUR') || 'EUR';
+	},
+	getSupportedCurrencies: function () {
+		let codes = Object.keys((this.exchangeRates && this.exchangeRates.rates) || {EUR: 1});
+		let selected = this.getDisplayCurrency();
+		if (codes.indexOf(selected) === -1) codes.push(selected);
+		return codes.sort().map(function (code) { return {code: code}; });
+	},
+	loadExchangeRates: function () {
+		Ext.Ajax.request({
+			url: Limas.getBasePath() + '/api/exchange-rates',
+			method: 'GET', scope: this,
+			success: function (response) {
+				this.exchangeRates = Ext.decode(response.responseText);
+				this.refreshCurrencyViews();
+			}
+		});
+	},
+	setExchangeRates: function (rates) {
+		this.exchangeRates = rates;
+		this.refreshCurrencyViews();
+	},
+	convertCurrency: function (value, sourceCode, targetCode) {
+		let source = String(sourceCode || 'EUR').toUpperCase();
+		let target = String(targetCode || this.getDisplayCurrency()).toUpperCase();
+		let amount = Number(value);
+		if (!isFinite(amount)) return null;
+		if (source === target) return amount;
+		let rates = this.exchangeRates && this.exchangeRates.rates;
+		if (!rates || !(rates[source] > 0) || !(rates[target] > 0)) return null;
+		return amount / rates[source] * rates[target];
+	},
+	refreshCurrencyViews: function () {
+		if (!Ext.ComponentQuery) return;
+		Ext.ComponentQuery.query('grid').forEach(function (grid) {
+			if (grid.recalculateCurrency) grid.recalculateCurrency();
+			let view = grid.getView && grid.getView();
+			if (view && view.refresh && view.rendered) view.refresh();
+		});
+	},
 	formatCurrency: function (value, code) {
 		let format = Ext.util.Format;
-		format.currencyPrecision = Limas.getApplication().getUserPreference('limas.formatting.currency.numdecimals', 2);
-		format.currencySign = Limas.getApplication().getUserPreference('limas.formatting.currency.symbol', '€');
+		let target = this.getDisplayCurrency();
+		let converted = this.convertCurrency(value, code || 'EUR', target);
+		let shownCode = converted === null ? String(code || 'EUR').toUpperCase() : target;
+		format.currencyPrecision = this.getUserPreference('limas.formatting.currency.numdecimals', 2);
+		let currencies = Ext.data.StoreManager.lookup('CurrencyStore');
+		let currency = currencies && currencies.findRecord('code', shownCode, 0, false, false, true);
+		format.currencySign = currency ? currency.get('symbol') : shownCode;
 
-		if (code !== null) {
-			let currency = Ext.data.StoreManager.lookup('CurrencyStore').findRecord('code', code, 0, false, false, true);
-			if (currency !== null) {
-				format.currencySign = currency.get('symbol');
-			}
-		}
+		format.currencyAtEnd = this.getUserPreference('limas.formatting.currency.currencySymbolAtEnd', true);
 
-		format.currencyAtEnd = Limas.getApplication().getUserPreference('limas.formatting.currency.currencySymbolAtEnd', true);
-
-		if (Limas.getApplication().getUserPreference('limas.formatting.currency.thousandsSeparator', true) === true) {
+		if (this.getUserPreference('limas.formatting.currency.thousandsSeparator', true) === true) {
 			// @todo This is hard-coded for now
 			format.thousandSeparator = ',';
 		} else {
 			format.thousandSeparator = '';
 		}
 
-		return format.currency(value);
+		return format.currency(converted === null ? value : converted);
 	},
 	switchTheme: function (theme) {
 		if (window.themes[theme]) {

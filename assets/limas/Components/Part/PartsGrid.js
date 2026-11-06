@@ -447,10 +447,16 @@ Ext.define('Limas.PartsGrid', {
 		let number = identifiers && identifiers[this.selectedDistributorField];
 		if (!number) return null;
 		let source = distributorName || '';
+		let url = null;
+		if (source === 'lcsc') url = this.getLcscProductUrl(record);
+		if (source === 'tme') {
+			let sku = String(identifiers.sku || identifiers.orderNumber || '').trim();
+			if (sku) url = 'https://www.tme.eu/details/' + encodeURIComponent(sku) + '/';
+		}
 		return {
 			number: String(number),
 			source: source,
-			url: source === 'lcsc' ? this.getLcscProductUrl(record) : null
+			url: url
 		};
 	},
 	renderDistributorNumber: function (record) {
@@ -489,17 +495,21 @@ Ext.define('Limas.PartsGrid', {
 		let breaks = Ext.isArray(offer.priceBreaks) ? offer.priceBreaks : [];
 		if (!breaks.length && (offer.price === null || offer.price === undefined || offer.price === '')) return '';
 		let price = breaks.length ? breaks[0].price : offer.price;
-		let exact = function (value) {
-			return String(value).replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '');
-		};
 		let currency = offer.currency || '';
+		let app = Limas.getApplication();
+		let display = function (value) {
+			let converted = app.convertCurrency(value, currency || 'EUR');
+			let amount = converted === null ? value : converted.toFixed(8);
+			let code = converted === null ? (currency || 'EUR') : app.getDisplayCurrency();
+			return String(amount).replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '') + ' ' + code;
+		};
 		if (breaks.length) {
 			metadata.tdAttr = 'data-qtip="' + breaks.map(function (tier) {
-				return Ext.htmlEncode(tier.quantity + '+: ' + exact(tier.price) + ' ' + currency);
+				return Ext.htmlEncode(tier.quantity + '+: ' + display(tier.price));
 			}).join('<br>') + '"';
 		}
 		let suffix = breaks.length && Number(breaks[0].quantity) > 1 ? ' (' + breaks[0].quantity + '+)' : '';
-		return Ext.htmlEncode(exact(price) + ' ' + currency + suffix);
+		return Ext.htmlEncode(display(price) + suffix);
 	},
 
 	_collectIncludeParameters: function () {

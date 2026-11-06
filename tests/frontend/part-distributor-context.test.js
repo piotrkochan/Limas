@@ -25,7 +25,10 @@ const Ext = {
   data: {StoreManager: {lookup: () => distributorStore}},
   htmlEncode: value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;')
 };
-const context = {Ext, i18n: text => text, window: {
+const context = {Ext, Limas: {getApplication: () => ({
+  convertCurrency: (value, source) => source === 'EUR' ? Number(value) : null,
+  getDisplayCurrency: () => 'EUR'
+})}, i18n: text => text, window: {
   open: (...args) => opened.push(args),
   getComputedStyle: () => ({font: '14px sans-serif'})
 }};
@@ -134,6 +137,7 @@ assert.equal(menuItems[0].checked, true);
 assert.equal(menuItems[2].checked, true);
 assert.match(grid.renderDistributorNumber(part), /C25862/);
 assert.match(grid.renderDistributorNumber(part), /SMD0402-10K-1%/);
+assert.match(grid.renderDistributorNumber(part), /href="https:\/\/www\.tme\.eu\/details\/SMD0402-10K-1%25\/"/);
 assert.match(grid.renderDistributorPrice(part, {}), /LCSC: 0\.0127 USD/);
 assert.match(grid.renderDistributorPrice(part, {}), /TME: 0\.02 EUR/);
 menuItems[1].listeners.checkchange.call(grid, null, false);
@@ -194,8 +198,9 @@ for (const [index, action] of [[0, 'edit'], [1, 'add'], [2, 'remove']]) {
   assert.equal(menu.destroyed, true);
 }
 managerClass.showPartContextMenu.call(manager, part, [10, 20]);
-assert.equal(menu.items[4].disabled, false);
-menu.click(4);
+assert.equal(menu.items[4].text, 'Update distributor data…');
+assert.equal(menu.items[5].disabled, false);
+menu.click(5);
 assert.deepEqual(opened[0], ['https://www.lcsc.com/product-detail/C25862.html', '_blank', 'noopener,noreferrer']);
 
 console.log('Part distributor column, LCSC link, and context actions passed');

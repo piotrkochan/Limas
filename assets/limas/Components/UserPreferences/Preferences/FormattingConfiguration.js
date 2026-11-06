@@ -8,8 +8,10 @@ Ext.define('Limas.Components.UserPreferences.Preferences.FormattingConfiguration
 		this.items = [
 			this.priceNumDecimalsField,
 			this.useThousandSeparatorCheckbox,
-			this.currencySymbolField,
-			this.currencyAtEndCheckbox
+			this.currencyCodeField,
+			this.currencyAtEndCheckbox,
+			this.rateInfo,
+			this.refreshRatesButton
 		];
 
 		this.callParent();
@@ -18,7 +20,8 @@ Ext.define('Limas.Components.UserPreferences.Preferences.FormattingConfiguration
 		this.priceNumDecimalsField.setValue(Limas.getApplication().getUserPreference('limas.formatting.currency.numdecimals', 2));
 		this.useThousandSeparatorCheckbox.setValue(Limas.getApplication().getUserPreference('limas.formatting.currency.thousandsSeparator', true));
 		this.currencyAtEndCheckbox.setValue(Limas.getApplication().getUserPreference('limas.formatting.currency.currencySymbolAtEnd', true));
-		this.currencySymbolField.setValue(Limas.getApplication().getUserPreference('limas.formatting.currency.symbol', '€'));
+		this.currencyCodeField.setValue(Limas.getApplication().getDisplayCurrency());
+		this.updateRateInfo();
 	},
 
 	createWidgets: function () {
@@ -38,10 +41,19 @@ Ext.define('Limas.Components.UserPreferences.Preferences.FormattingConfiguration
 			hideEmptyLabel: false
 		});
 
-		this.currencySymbolField = Ext.create('Ext.form.field.Text', {
-			fieldLabel: i18n('Currency Symbol'),
-			labelWidth: 120,
-			maxLength: 5
+		this.currencyCodeField = Ext.create('Ext.form.field.ComboBox', {
+			fieldLabel: i18n('Display currency'), labelWidth: 120,
+			queryMode: 'local', displayField: 'code', valueField: 'code',
+			editable: false, forceSelection: true,
+			store: Ext.create('Ext.data.Store', {fields: ['code'], data: Limas.getApplication().getSupportedCurrencies()}),
+			listeners: {expand: function (combo) {
+				combo.getStore().loadData(Limas.getApplication().getSupportedCurrencies());
+			}}
+		});
+		this.rateInfo = Ext.create('Ext.Component', {html: ''});
+		this.refreshRatesButton = Ext.create('Ext.button.Button', {
+			text: i18n('Update exchange rates'),
+			handler: this.refreshRates, scope: this
 		});
 
 		this.currencyAtEndCheckbox = Ext.create('Ext.form.field.Checkbox', {
@@ -55,8 +67,31 @@ Ext.define('Limas.Components.UserPreferences.Preferences.FormattingConfiguration
 		let app = Limas.getApplication();
 		app.setUserPreference('limas.formatting.currency.numdecimals', this.priceNumDecimalsField.getValue());
 		app.setUserPreference('limas.formatting.currency.thousandsSeparator', this.useThousandSeparatorCheckbox.getValue());
-		app.setUserPreference('limas.formatting.currency.symbol', this.currencySymbolField.getValue());
-		app.setUserPreference('liams.formatting.currency.currencySymbolAtEnd', this.currencyAtEndCheckbox.getValue());
+		app.setUserPreference('limas.formatting.currency.code', this.currencyCodeField.getValue());
+		app.setUserPreference('limas.formatting.currency.currencySymbolAtEnd', this.currencyAtEndCheckbox.getValue());
+		app.refreshCurrencyViews();
+	},
+	updateRateInfo: function () {
+		let rates = Limas.getApplication().exchangeRates;
+		if (this.rateInfo) this.rateInfo.setHtml(rates
+			? Ext.htmlEncode(i18n('ECB rates from') + ' ' + rates.date)
+			: Ext.htmlEncode(i18n('Exchange rates unavailable')));
+	},
+	refreshRates: function () {
+		this.refreshRatesButton.setDisabled(true);
+		Ext.Ajax.request({
+			url: Limas.getBasePath() + '/api/exchange-rates/refresh', method: 'POST', scope: this,
+			success: function (response) {
+				Limas.getApplication().setExchangeRates(Ext.decode(response.responseText));
+				this.currencyCodeField.getStore().loadData(Limas.getApplication().getSupportedCurrencies());
+				this.updateRateInfo();
+				this.refreshRatesButton.setDisabled(false);
+			},
+			failure: function () {
+				this.refreshRatesButton.setDisabled(false);
+				Ext.Msg.alert(i18n('Exchange rates'), i18n('Could not fetch ECB exchange rates.'));
+			}
+		});
 	},
 	statics: {
 		iconCls: 'fugue-icon ui-text-field-format',
