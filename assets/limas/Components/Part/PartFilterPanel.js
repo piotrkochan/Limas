@@ -65,6 +65,7 @@ Ext.define('Limas.PartFilterPanel', {
 			columnWidth: 0.5,
 			items: [
 				this.storageLocationContainer,
+				this.distributorFilter,
 				this.categoryFilter,
 				this.partsWithoutPrice,
 				this.createDateFilter,
@@ -83,7 +84,6 @@ Ext.define('Limas.PartFilterPanel', {
 			items: [
 				this.stockFilter,
 				this.distributorOrderNumberFilter,
-				this.distributorFilter,
 				this.manufacturerFilter,
 				this.manufacturerPartNumberFilter,
 				this.footprintFilter,

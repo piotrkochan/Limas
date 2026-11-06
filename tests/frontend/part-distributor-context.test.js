@@ -36,7 +36,8 @@ const grid = {
   selectedDistributorField: 'sku',
   getLcscProductUrl: record => gridClass.getLcscProductUrl.call(grid, record),
   getDistributorNumberInfo: record => gridClass.getDistributorNumberInfo.call(grid, record),
-  renderDistributorNumber: record => gridClass.renderDistributorNumber.call(grid, record)
+  renderDistributorNumber: record => gridClass.renderDistributorNumber.call(grid, record),
+  fitCatalogSelector: () => {}
 };
 assert.equal(grid.getLcscProductUrl(part), 'https://www.lcsc.com/product-detail/C25862.html');
 assert.equal(grid.getDistributorNumberInfo(part).number, 'C25862');
@@ -115,8 +116,8 @@ for (const [index, action] of [[0, 'edit'], [1, 'add'], [2, 'remove']]) {
   assert.equal(menu.destroyed, true);
 }
 managerClass.showPartContextMenu.call(manager, part, [10, 20]);
-assert.equal(menu.items[3].disabled, false);
-menu.click(3);
+assert.equal(menu.items[4].disabled, false);
+menu.click(4);
 assert.deepEqual(opened[0], ['https://www.lcsc.com/product-detail/C25862.html', '_blank', 'noopener,noreferrer']);
 
 console.log('Part distributor column, LCSC link, and context actions passed');

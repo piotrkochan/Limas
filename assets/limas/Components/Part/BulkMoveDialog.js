@@ -33,6 +33,7 @@ Ext.define('Limas.Components.Part.BulkMoveDialog', {
 		this.items = [{
 			xtype: 'form',
 			border: false,
+			layout: 'anchor',
 			bodyPadding: 12,
 			items: [
 				{

@@ -55,6 +55,12 @@ Ext.define('Limas.RemotePartComboBox', {
 			store: this.store,
 			region: 'center'
 		});
+		this.expandPickerButton = Ext.create('Ext.button.Button', {
+			text: i18n('Expand'),
+			iconCls: 'fugue-icon arrow-out',
+			handler: Ext.bind(this.togglePickerSize, this)
+		});
+		this.partsGrid.topToolbar.add(this.expandPickerButton);
 
 		this.filter = Ext.create('Limas.PartFilterPanel', {
 			region: 'south',
@@ -81,7 +87,8 @@ Ext.define('Limas.RemotePartComboBox', {
 			floating: true,
 			focusOnToFront: false,
 			manageHeight: false,
-			height: 300,
+			height: 400,
+			width: 600,
 			minWidth: 350,
 			shadow: false,
 			ownerCmp: this,
@@ -103,6 +110,25 @@ Ext.define('Limas.RemotePartComboBox', {
 		}, this);
 
 		return this.picker;
+	},
+	togglePickerSize: function () {
+		this.pickerExpanded = !this.pickerExpanded;
+		if (this.pickerExpanded) {
+			this.picker.setSize(Math.min(1100, Ext.Element.getViewportWidth() - 40),
+				Math.min(700, Ext.Element.getViewportHeight() - 40));
+			this.picker.alignTo(Ext.getBody(), 'c-c');
+			this.expandPickerButton.setText(i18n('Compact'));
+			this.filter.setHeight(300);
+		} else {
+			this.picker.setSize(600, 400);
+			this.alignPicker();
+			this.expandPickerButton.setText(i18n('Expand'));
+			this.filter.setHeight(225);
+		}
+	},
+	alignPicker: function () {
+		if (this.pickerExpanded) this.picker.alignTo(Ext.getBody(), 'c-c');
+		else this.callParent(arguments);
 	},
 	getDisplayValue: function () {
 		return this.displayValue;

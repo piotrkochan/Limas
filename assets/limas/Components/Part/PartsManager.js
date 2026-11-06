@@ -66,6 +66,7 @@ Ext.define('Limas.PartManager', {
 
 		// Trigger a grid reload on category change
 		this.tree.on('itemclick', this.onCategoryClick, this);
+		this.tree.on('itemcontextmenu', this.onCategoryContextMenu, this);
 
 		// Create the detail panel
 		this.detail = Ext.create('Limas.PartDisplay', {title: i18n('Part Details')});
@@ -454,6 +455,32 @@ Ext.define('Limas.PartManager', {
 			this.loadProjects(Ext.bind(function () { this.showPartContextMenu(record, position); }, this));
 		}
 	},
+	onCategoryContextMenu: function (view, record, item, index, event) {
+		event.stopEvent();
+		this.tree.getSelectionModel().select(record);
+		let menu = Ext.create('Ext.menu.Menu', {items: [{
+			text: i18n('Show parts'), iconCls: 'web-icon bricks',
+			handler: Ext.bind(function () { this.onCategoryClick(this.tree, record); }, this)
+		}, '-', {
+			text: i18n('Add subcategory'), iconCls: 'web-icon folder_add',
+			handler: Ext.bind(this.tree.showCategoryAddDialog, this.tree)
+		}, {
+			text: i18n('Edit category'), iconCls: 'web-icon folder_edit',
+			handler: Ext.bind(this.tree.showCategoryEditDialog, this.tree)
+		}, {
+			text: i18n('Delete category'), iconCls: 'web-icon folder_delete',
+			disabled: !record.parentNode || record.parentNode.isRoot() || record.hasChildNodes(),
+			handler: Ext.bind(this.tree.confirmCategoryDelete, this.tree)
+		}, '-', {
+			text: i18n('Expand'), disabled: !record.hasChildNodes(),
+			handler: function () { record.expand(); }
+		}, {
+			text: i18n('Collapse'), disabled: !record.hasChildNodes(),
+			handler: function () { record.collapse(); }
+		}]});
+		menu.on('hide', function () { Ext.defer(menu.destroy, 1, menu); });
+		menu.showAt(event.getXY());
+	},
 	showPartContextMenu: function (record, position) {
 		let lcscUrl = this.grid.getLcscProductUrl(record);
 		let menuItems = [{
@@ -465,6 +492,11 @@ Ext.define('Limas.PartManager', {
 		}, {
 			text: i18n('Remove Stock'), iconCls: 'web-icon brick_delete',
 			handler: Ext.bind(function () { this.changeStockFromMenu(record, false); }, this)
+		}, {
+			text: i18n('Update prices'), iconCls: 'fugue-icon money-coin',
+			handler: Ext.bind(function () {
+				this.grid.bulkActionsButton.refreshPrices([record.get('@id')]);
+			}, this)
 		}, {
 			text: i18n('Open in LCSC'), iconCls: 'distributor-icon lcsc',
 			disabled: !lcscUrl,

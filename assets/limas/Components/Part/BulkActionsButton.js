@@ -26,6 +26,10 @@ Ext.define('Limas.Components.Part.BulkActionsButton', {
 					text: i18n('Auto category…'),
 					iconCls: 'web-icon folder',
 					handler: Ext.bind(this.onAutoCategoryClick, this)
+				}, {
+					text: i18n('Update prices'),
+					iconCls: 'fugue-icon money-coin',
+					handler: Ext.bind(this.onRefreshPricesClick, this)
 				}
 			]
 		});
@@ -99,5 +103,44 @@ Ext.define('Limas.Components.Part.BulkActionsButton', {
 				}
 			}, this)
 		}).show();
+	},
+	onRefreshPricesClick: function () {
+		this.refreshPrices(this.getSelectedIris());
+	},
+	refreshPrices: function (iris) {
+		if (!iris || !iris.length) return;
+		if (iris.length > 100) {
+			Ext.Msg.alert(i18n('Update prices'), i18n('Select at most 100 parts per batch.'));
+			return;
+		}
+		this.grid.setLoading(i18n('Updating distributor prices…'));
+		Ext.Ajax.request({
+			url: Limas.getBasePath() + '/api/parts/refreshPrices',
+			method: 'POST',
+			timeout: 180000,
+			jsonData: {parts: iris},
+			scope: this,
+			success: function (response) {
+				this.grid.setLoading(false);
+				let result = Ext.decode(response.responseText);
+				this.grid.store.reload();
+				let summary = Ext.String.format(i18n('Updated {0} distributor offer(s).'), result.updated || 0);
+				let skipped = result.skipped || [];
+				if (skipped.length) {
+					summary += '<br><br>' + Ext.String.format(i18n('Skipped {0} offer(s):'), skipped.length)
+						+ '<br>' + skipped.slice(0, 15).map(function (item) {
+							return '#' + Number(item.partId) + ' ' + Ext.htmlEncode(item.distributor)
+								+ ': ' + Ext.htmlEncode(item.reason);
+						}).join('<br>');
+				}
+				Ext.Msg.alert(i18n('Update prices'), summary);
+			},
+			failure: function (response) {
+				this.grid.setLoading(false);
+				let body = {};
+				try { body = Ext.decode(response.responseText); } catch (error) {}
+				Ext.Msg.alert(i18n('Update prices'), Ext.htmlEncode(body.error || i18n('Price update failed.')));
+			}
+		});
 	}
 });
