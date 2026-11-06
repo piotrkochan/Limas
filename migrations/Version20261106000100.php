@@ -16,4 +16,9 @@ final class Version20261106000100 extends AbstractMigration
 	{
 		$this->addSql('ALTER TABLE PartCategory DROP color');
 	}
+
+	public function isTransactional(): bool
+	{
+		return false;
+	}
 }

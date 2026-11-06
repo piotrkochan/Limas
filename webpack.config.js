@@ -318,6 +318,7 @@ if (!Encore.isDev()) {
 				'@/limas/Components/Editor/EditorGrid.js',
 				'@/limas/Components/Distributor/DistributorGrid.js',
 				'@/limas/Components/Part/BulkMoveDialog.js',
+				'@/limas/Components/Part/AutoCategoryDialog.js',
 				'@/limas/Components/Part/BulkActionsButton.js',
 				'@/limas/Components/Part/PartsGrid.js',
 				'@/limas/Components/Manufacturer/ManufacturerGrid.js',
