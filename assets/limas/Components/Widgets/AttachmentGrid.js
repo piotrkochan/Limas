@@ -218,6 +218,11 @@ Ext.define('Limas.AttachmentGrid', {
 		window.open(url, '_blank', 'noopener,noreferrer');
 	},
 	viewAttachment: function (record) {
+		let filename = String(record.get('originalFilename') || '');
+		if (/\.(csv|tsv)$/i.test(filename)) {
+			this.viewTextAttachment(record);
+			return;
+		}
 		let mySrc = record.getId() + '/getFile';
 		new Ext.Window({
 			title: i18n('Display File'),
@@ -237,5 +242,35 @@ Ext.define('Limas.AttachmentGrid', {
 			]
 		})
 			.show();
+	},
+	viewTextAttachment: function (record) {
+		// getFile intentionally sends CSV as an attachment for browser safety.
+		// Fetch the bytes with XHR and escape them before showing text here.
+		let viewer = Ext.create('Ext.Component', {
+			padding: 12,
+			autoScroll: true,
+			html: Ext.htmlEncode(i18n('Loading…'))
+		});
+		let win = Ext.create('Ext.window.Window', {
+			title: record.get('originalFilename') || i18n('Display File'),
+			width: 850,
+			height: 600,
+			maximizable: true,
+			constrain: true,
+			layout: 'fit',
+			items: [viewer]
+		});
+		win.show();
+		Ext.Ajax.request({
+			url: record.getId() + '/getFile',
+			method: 'GET',
+			success: function (response) {
+				if (!win.destroyed) viewer.update('<pre style="white-space:pre;overflow:auto;user-select:text">'
+					+ Ext.htmlEncode(response.responseText) + '</pre>');
+			},
+			failure: function () {
+				if (!win.destroyed) viewer.update(Ext.htmlEncode(i18n('Could not load attachment.')));
+			}
+		});
 	}
 });
