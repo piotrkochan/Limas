@@ -182,13 +182,18 @@ Ext.define('Limas.form.field.SearchField', {
 			return;
 		}
 
-		this.filter.setValue(searchValue);
-
-		if (!store.getFilters().contains(this.filter)) {
-			store.getFilters().add(this.filter);
+		let filters = store.getFilters();
+		filters.beginUpdate();
+		try {
+			this.fireEvent('beforesearch', this, searchValue);
+			this.filter.setValue(searchValue);
+			if (!filters.contains(this.filter)) {
+				filters.add(this.filter);
+			}
+			filters.itemChanged(this.filter);
+		} finally {
+			filters.endUpdate();
 		}
-
-		store.getFilters().itemChanged(this.filter);
 
 		me.hasSearch = true;
 		this.getTrigger('clear').show();

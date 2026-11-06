@@ -106,6 +106,7 @@ Ext.define('Limas.PartManager', {
 		this.grid.on('duplicateItemWithBasicData', this.onDuplicateItemWithBasicData, this);
 		this.grid.on('duplicateItemWithAllData', this.onDuplicateItemWithAllData, this);
 		this.grid.on('itemcontextmenu', this.onPartContextMenu, this);
+		this.grid.searchField.on('beforesearch', this.onBeforePartSearch, this);
 		this.store.on('load', function () { Limas.getApplication().writeRoute(); }, this);
 		this.tree.on('syncCategory', this.onSyncCategory, this);
 		this.tree.on('partCategoryChanged', this.refreshCategoryCounts, this);
@@ -354,6 +355,17 @@ Ext.define('Limas.PartManager', {
 		}
 		filters.endUpdate();
 		this.refreshCategoryCounts();
+		Limas.getApplication().writeRoute();
+	},
+	onBeforePartSearch: function () {
+		// The toolbar search covers all categories in the active project.
+		// Clear a tree selection before its filter combines with the search.
+		if (!this.selectedCategory && !this.categoryFilter) return;
+		if (this.categoryFilter) this.store.getFilters().remove(this.categoryFilter);
+		this.categoryFilter = null;
+		this.selectedCategory = null;
+		this.tree.getSelectionModel().deselectAll();
+		this.grid.removeNotification();
 		Limas.getApplication().writeRoute();
 	},
 	getRouteQuery: function () {

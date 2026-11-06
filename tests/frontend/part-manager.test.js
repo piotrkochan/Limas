@@ -85,6 +85,21 @@ manager.loadProjects.call(choicesContext);
 assert.equal(projectOptions[0].id, manager.allPartsValue);
 assert.equal(selectedProjectValue, manager.allPartsValue);
 
+let categoryDeselected = false;
+let categoryFilterRemoved = false;
+const categorySearchContext = {
+  selectedCategory: {},
+  categoryFilter: {},
+  store: {getFilters: () => ({remove: () => { categoryFilterRemoved = true; }})},
+  tree: {getSelectionModel: () => ({deselectAll: () => { categoryDeselected = true; }})},
+  grid: {removeNotification: () => {}}
+};
+manager.onBeforePartSearch.call(categorySearchContext);
+assert.equal(categorySearchContext.selectedCategory, null);
+assert.equal(categorySearchContext.categoryFilter, null);
+assert.equal(categoryDeselected, true);
+assert.equal(categoryFilterRemoved, true);
+
 let request;
 let responseCounts;
 Ext.Ajax = {request: options => { request = options; }};

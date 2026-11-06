@@ -263,6 +263,31 @@ class AdvancedSearchFilterTest
 		self::assertCount(2, $data['hydra:member']);
 	}
 
+	public function testOrSearchIncludesPartWithoutManufacturer(): void
+	{
+		$client = $this->makeAuthenticatedClient();
+		$client->request(
+			'GET',
+			'/api/parts?filter=' . Json::encode([
+				[
+					'type' => 'OR',
+					'subfilters' => [
+						['property' => 'name', 'operator' => 'LIKE', 'value' => '%FOOBAR%'],
+						['property' => 'manufacturers.partNumber', 'operator' => 'LIKE', 'value' => '%FOOBAR%']
+					]
+				]
+			]),
+			[],
+			[],
+			['CONTENT_TYPE' => 'application/json']
+		);
+		self::assertResponseIsSuccessful();
+
+		$data = json_decode($client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+		$ids = array_column($data['hydra:member'], '@id');
+		self::assertContains('/api/parts/' . $this->fixtures->getReference('part.1', Part::class)->getId(), $ids);
+	}
+
 	/**
 	 * A filter path that isn't a real field/association on the entity, or is
 	 * nested too deeply, must be rejected with a clean 400 — not leak a DQL

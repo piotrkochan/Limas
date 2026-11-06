@@ -114,7 +114,9 @@ class AdvancedSearchFilter
 		foreach ($associations as $key => $association) {
 			$parent = $associations[$key - 1] ?? 'o';
 			$fullAssociation .= '.' . $association;
-			$queryBuilder->join($parent . '.' . $association, $this->getAlias($fullAssociation));
+			// An OR search may match a direct field even when this optional
+			// association has no rows (for example name OR manufacturer MPN).
+			$queryBuilder->leftJoin($parent . '.' . $association, $this->getAlias($fullAssociation));
 		}
 
 		$this->joins[] = $filter->getAssociation();
