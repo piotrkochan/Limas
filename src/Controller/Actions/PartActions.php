@@ -271,6 +271,46 @@ class PartActions
 			->getQuery()->getArrayResult());
 	}
 
+	#[Route(path: '/api/parts/project-memberships', methods: ['POST'], priority: 100)]
+	public function bulkProjectMembershipAction(Request $request): JsonResponse
+	{
+		try {
+			$data = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
+		} catch (\JsonException) {
+			throw new BadRequestHttpException('Invalid JSON');
+		}
+		if (!is_array($data) || !isset($data['parts'], $data['projectId'], $data['included'])
+			|| !is_array($data['parts']) || !is_int($data['projectId']) || $data['projectId'] < 1
+			|| !is_bool($data['included']) || count($data['parts']) < 1 || count($data['parts']) > 1000) {
+			throw new BadRequestHttpException('Expected 1-1000 parts, projectId and included');
+		}
+		$ids = [];
+		foreach ($data['parts'] as $iri) {
+			if (!is_string($iri) || !preg_match('~^/api/parts/([1-9][0-9]*)$~', $iri, $match)) {
+				throw new BadRequestHttpException('Invalid part IRI');
+			}
+			$ids[(int)$match[1]] = (int)$match[1];
+		}
+		$project = $this->entityManager->find(Project::class, $data['projectId']);
+		if ($project === null) throw $this->createNotFoundException('Project not found');
+		$parts = $this->entityManager->getRepository(Part::class)->findBy(['id' => array_values($ids)]);
+		if (count($parts) !== count($ids)) throw $this->createNotFoundException('Part not found');
+		$rows = $this->entityManager->getRepository(ProjectPart::class)->findBy(['part' => $parts, 'project' => $project]);
+		if ($data['included']) {
+			$existing = [];
+			foreach ($rows as $row) $existing[$row->getPart()->getId()] = true;
+			foreach ($parts as $part) {
+				if (isset($existing[$part->getId()])) continue;
+				$this->entityManager->persist((new ProjectPart)
+					->setPart($part)->setProject($project)->setQuantity(1));
+			}
+		} else {
+			foreach ($rows as $row) $this->entityManager->remove($row);
+		}
+		$this->entityManager->flush();
+		return $this->json(['partIds' => array_values($ids), 'projectId' => $data['projectId'], 'included' => $data['included']]);
+	}
+
 	#[Route(path: '/api/parts/{id}/project-memberships/{projectId}', methods: ['PUT', 'DELETE'], priority: 100)]
 	public function projectMembershipAction(Request $request, int $id, int $projectId): JsonResponse
 	{

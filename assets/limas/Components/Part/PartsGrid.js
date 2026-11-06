@@ -303,6 +303,9 @@ Ext.define('Limas.PartsGrid', {
 		this.on('reconfigure', this._refreshIncludeParameters, this);
 	},
 	onBeforePartMouseDown: function (view, record, item, index, event) {
+		// The selection model handles itemmousedown before the context menu.
+		// Keep the current group when right-clicking one of its rows.
+		if (event.button === 2 && this.getSelectionModel().isSelected(record)) return false;
 		// Shift-click selects a row range. Stop only the browser's native
 		// text-range gesture; ordinary drag-to-copy remains available.
 		if (event.shiftKey && event.button === 0) event.preventDefault();

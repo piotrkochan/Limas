@@ -18,7 +18,10 @@ const Ext = {
   defer: (handler, delay, scope) => deferred.push(() => handler.call(scope)),
   Array: {
     contains: (items, value) => items.includes(value),
-    each: (items, callback, scope) => items.forEach(item => callback.call(scope, item))
+    each: (items, callback, scope) => items.forEach(item => callback.call(scope, item)),
+    map: (items, callback) => items.map(callback),
+    filter: (items, callback) => items.filter(callback),
+    from: items => Array.from(items)
   },
   isArray: Array.isArray,
   Object: {each: (object, callback) => Object.entries(object).forEach(([key, value]) => callback(key, value))},
@@ -194,6 +197,7 @@ const actions = [];
 const manager = {
   grid,
   projects: [],
+  showPartContextMenu: (...args) => managerClass.showPartContextMenu.call(manager, ...args),
   onEditPart: () => actions.push('edit'),
   changeStockFromMenu: (_record, add) => actions.push(add ? 'add' : 'remove')
 };
@@ -210,5 +214,39 @@ assert.equal(menu.items[4].text, 'Update distributor data…');
 assert.equal(menu.items[5].disabled, false);
 menu.click(5);
 assert.deepEqual(opened[0], ['https://www.lcsc.com/product-detail/C25862.html', '_blank', 'noopener,noreferrer']);
+
+const first = {get: key => key === '@id' ? '/api/parts/10' : key === 'projectIds' ? [7] : null};
+const second = {get: key => key === '@id' ? '/api/parts/11' : key === 'projectIds' ? [] : null};
+let selected = [first, second];
+let selectCalls = 0;
+grid.getSelectionModel = () => ({
+  isSelected: record => selected.includes(record),
+  select: record => { selectCalls++; selected = [record]; },
+  getSelection: () => selected
+});
+const bulk = [];
+grid.bulkActionsButton = {
+  refreshPrices: iris => bulk.push(['prices', ...iris]),
+  refreshData: iris => bulk.push(['data', ...iris])
+};
+manager.projects = [{id: 7, name: 'Project X'}];
+manager.projectsLoaded = true;
+managerClass.onPartContextMenu.call(manager, null, first, null, 0, {stopEvent() {}, getXY: () => [10, 20]});
+assert.equal(selectCalls, 0);
+assert.equal(menu.items[0].text, '2 parts selected');
+assert.equal(menu.items[2].disabled, true);
+assert.equal(menu.items[3].disabled, true);
+assert.equal(menu.items[4].disabled, true);
+assert.equal(menu.items[7].disabled, true);
+assert.match(menu.items.at(-1).text, /Project X \(some\)/);
+menu.items[5].handler();
+menu.items[6].handler();
+assert.deepEqual(bulk, [
+  ['prices', '/api/parts/10', '/api/parts/11'],
+  ['data', '/api/parts/10', '/api/parts/11']
+]);
+managerClass.onPartContextMenu.call(manager, null, part, null, 0, {stopEvent() {}, getXY: () => [10, 20]});
+assert.equal(selectCalls, 1);
+assert.equal(menu.items[0].text, 'Edit');
 
 console.log('Part distributor column, LCSC link, and context actions passed');

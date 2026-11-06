@@ -462,12 +462,14 @@ Ext.define('Limas.PartManager', {
 	},
 	onPartContextMenu: function (view, record, item, index, event) {
 		event.stopEvent();
-		this.grid.getSelectionModel().select(record);
+		let selection = this.grid.getSelectionModel();
+		if (!selection.isSelected(record)) selection.select(record);
+		let records = selection.getSelection();
 		let position = event.getXY();
 		if (this.projectsLoaded) {
-			this.showPartContextMenu(record, position);
+			this.showPartContextMenu(record, position, records);
 		} else {
-			this.loadProjects(Ext.bind(function () { this.showPartContextMenu(record, position); }, this));
+			this.loadProjects(Ext.bind(function () { this.showPartContextMenu(record, position, records); }, this));
 		}
 	},
 	onCategoryContextMenu: function (view, record, item, index, event) {
@@ -496,39 +498,50 @@ Ext.define('Limas.PartManager', {
 		menu.on('hide', function () { Ext.defer(menu.destroy, 1, menu); });
 		menu.showAt(event.getXY());
 	},
-	showPartContextMenu: function (record, position) {
+	showPartContextMenu: function (record, position, records) {
+		records = records && records.length ? records : [record];
+		let multiple = records.length > 1;
+		let iris = Ext.Array.map(records, function (part) { return part.get('@id'); });
 		let lcscUrl = this.grid.getLcscProductUrl(record);
 		let menuItems = [{
 			text: i18n('Edit'), iconCls: 'web-icon brick_edit',
+			disabled: multiple,
 			handler: Ext.bind(function () { this.onEditPart(record); }, this)
 		}, {
 			text: i18n('Add Stock'), iconCls: 'web-icon brick_add',
+			disabled: multiple,
 			handler: Ext.bind(function () { this.changeStockFromMenu(record, true); }, this)
 		}, {
 			text: i18n('Remove Stock'), iconCls: 'web-icon brick_delete',
+			disabled: multiple,
 			handler: Ext.bind(function () { this.changeStockFromMenu(record, false); }, this)
 		}, {
 			text: i18n('Update prices'), iconCls: 'fugue-icon money-coin',
 			handler: Ext.bind(function () {
-				this.grid.bulkActionsButton.refreshPrices([record.get('@id')]);
+				this.grid.bulkActionsButton.refreshPrices(iris);
 			}, this)
 		}, {
 			text: i18n('Update distributor data…'), iconCls: 'web-icon lorry',
 			handler: Ext.bind(function () {
-				this.grid.bulkActionsButton.refreshData([record.get('@id')]);
+				this.grid.bulkActionsButton.refreshData(iris);
 			}, this)
 		}, {
 			text: i18n('Open in LCSC'), iconCls: 'distributor-icon lcsc',
-			disabled: !lcscUrl,
+			disabled: multiple || !lcscUrl,
 			handler: function () { window.open(lcscUrl, '_blank', 'noopener,noreferrer'); }
 		}, '-', {text: i18n('Projects'), disabled: true}];
+		if (multiple) menuItems.unshift({text: records.length + ' ' + i18n('parts selected'), disabled: true}, '-');
 		Ext.Array.each(this.projects || [], function (project) {
+			let included = Ext.Array.filter(records, function (part) {
+				return Ext.Array.contains(part.get('projectIds') || [], Number(project.id));
+			}).length;
 			menuItems.push(Ext.create('Ext.menu.CheckItem', {
-				text: Ext.htmlEncode(project.name),
-				checked: Ext.Array.contains(record.get('projectIds') || [], Number(project.id)),
+				text: Ext.htmlEncode(project.name) + (included > 0 && included < records.length ? ' (' + i18n('some') + ')' : ''),
+				checked: included === records.length,
 				hideOnClick: false,
 				checkHandler: function (item, checked) {
-					this.changeProjectMembership(record, project.id, item, checked);
+					if (multiple) this.changeProjectMembershipBulk(records, project.id, item, checked);
+					else this.changeProjectMembership(record, project.id, item, checked);
 				},
 				scope: this
 			}));
@@ -538,6 +551,38 @@ Ext.define('Limas.PartManager', {
 		// Destroying it synchronously here cancels Edit and stock actions.
 		menu.on('hide', function () { Ext.defer(menu.destroy, 1, menu); });
 		menu.showAt(position);
+	},
+	changeProjectMembershipBulk: function (records, projectId, item, checked) {
+		item.setDisabled(true);
+		Ext.Ajax.request({
+			url: '/api/parts/project-memberships',
+			method: 'POST',
+			jsonData: {
+				parts: Ext.Array.map(records, function (part) { return part.get('@id'); }),
+				projectId: Number(projectId), included: checked
+			},
+			scope: this,
+			success: function () {
+				Ext.Array.each(records, function (record) {
+					let ids = Ext.Array.filter(Ext.Array.from(record.get('projectIds') || []), function (id) {
+						return Number(id) !== Number(projectId);
+					});
+					if (checked) ids.push(Number(projectId));
+					record.set('projectIds', ids);
+					record.commit();
+				});
+				if (!item.destroyed) item.setDisabled(false);
+				this.store.reload();
+				this.refreshCategoryCounts();
+			},
+			failure: function () {
+				if (!item.destroyed) {
+					item.setChecked(!checked, true);
+					item.setDisabled(false);
+				}
+				Ext.Msg.alert(i18n('Projects'), i18n('Could not update project membership.'));
+			}
+		});
 	},
 	changeProjectMembership: function (record, projectId, item, checked) {
 		let match = String(record.get('@id') || record.getId()).match(/(\d+)$/);
