@@ -21,6 +21,7 @@ use Limas\Controller\Actions\PartCategoryActions;
 use Limas\Entity\Traits\Tree;
 use Limas\State\PartCategoryDeleteProcessor;
 use Symfony\Component\Serializer\Attribute\Groups;
+use Symfony\Component\Validator\Constraints as Assert;
 
 
 #[ORM\Entity(repositoryClass: NestedTreeRepository::class)]
@@ -84,6 +85,10 @@ class PartCategory
 	#[ORM\OneToMany(targetEntity: PartCategoryDefaultParameter::class, mappedBy: 'category', cascade: ['persist', 'remove'], orphanRemoval: true)]
 	#[Groups(['default'])]
 	private Collection $defaultParameters;
+	#[ORM\Column(type: 'string', length: 7, nullable: true)]
+	#[Groups(['default', 'tree'])]
+	#[Assert\Regex(pattern: '/^#[0-9a-fA-F]{6}$/')]
+	private ?string $color = null;
 
 
 	public function __construct()
@@ -118,6 +123,17 @@ class PartCategory
 	public function getChildren(): Collection
 	{
 		return $this->children;
+	}
+
+	public function getColor(): ?string
+	{
+		return $this->color;
+	}
+
+	public function setColor(?string $color): self
+	{
+		$this->color = $color === '' ? null : $color;
+		return $this;
 	}
 
 	/**

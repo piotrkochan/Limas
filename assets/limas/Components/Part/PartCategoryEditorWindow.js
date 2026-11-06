@@ -19,6 +19,25 @@ Ext.define('Limas.PartCategoryEditorWindow', {
 		this.formPanel = Ext.create('Limas.CategoryEditorForm', {
 			title: i18n('General')
 		});
+		this.colorEnabled = Ext.create('Ext.form.field.Checkbox', {
+			boxLabel: i18n('Use folder color'),
+			margin: '0 12 0 0',
+			listeners: {
+				change: Ext.bind(function (field, enabled) { this.colorField.setDisabled(!enabled); }, this)
+			}
+		});
+		this.colorField = Ext.create('Ext.form.field.Text', {
+			name: 'color',
+			inputType: 'color',
+			width: 65,
+			value: '#d4ad4a'
+		});
+		this.formPanel.add({
+			xtype: 'fieldcontainer',
+			fieldLabel: i18n('Folder color'),
+			layout: 'hbox',
+			items: [this.colorEnabled, this.colorField]
+		});
 
 		this.inheritedGrid = Ext.create('Limas.Components.Part.PartCategoryInheritedDefaultsGrid');
 		this.defaultsGrid = Ext.create('Limas.Components.Part.PartCategoryDefaultsGrid', {
@@ -56,6 +75,10 @@ Ext.define('Limas.PartCategoryEditorWindow', {
 		}
 
 		this.formPanel.loadRecord(this.record);
+		let color = this.record.get('color');
+		this.colorEnabled.setValue(!!color);
+		this.colorField.setValue(color || '#d4ad4a');
+		this.colorField.setDisabled(!color);
 
 		if (!this.record.phantom) {
 			this.defaultsGrid.bindCategoryRecord(this.record);
@@ -80,6 +103,7 @@ Ext.define('Limas.PartCategoryEditorWindow', {
 
 	onSave: function () {
 		this.formPanel.updateRecord(this.record);
+		this.record.set('color', this.colorEnabled.getValue() ? this.colorField.getValue() : null);
 
 		let wasPhantom = this.record.phantom;
 		this.record.save({

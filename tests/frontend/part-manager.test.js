@@ -42,6 +42,9 @@ assert.equal(categoryTree.renderCategoryName.call(tree, 'Parent', populatedMeta,
 const emptyMeta = {};
 assert.equal(categoryTree.renderCategoryName.call(tree, 'Empty', emptyMeta, empty), 'Empty');
 assert.match(emptyMeta.tdStyle, /opacity/);
+assert.equal(categoryTree.folderColorFilter('#ff0000') !== '', true);
+assert.equal(categoryTree.folderColorFilter(null), '');
+assert.equal(categoryTree.folderColorFilter('red'), '');
 
 const manager = classes['Limas.PartManager'];
 const changes = [];
