@@ -6,6 +6,7 @@ Ext.define('Limas.ProjectEditor', {
 	bodyPadding: 0,
 	autoScroll: false,
 	layout: 'fit',
+	editAfterSave: false,
 
 	initComponent: function () {
 		/**
@@ -44,6 +45,7 @@ Ext.define('Limas.ProjectEditor', {
 			title: i18n('Attachments'),
 			iconCls: 'web-icon attach'
 		});
+		this.attachmentGrid.on('attachmentUploaded', this.onAttachmentUploaded, this);
 
 		this.detailsPanel = Ext.create('Ext.panel.Panel', {
 			title: i18n('Project Details'),
@@ -84,7 +86,12 @@ Ext.define('Limas.ProjectEditor', {
 		this.updateSaveToolbar();
 	},
 	updateSaveToolbar: function () {
-		if (this.bottomToolbar) this.bottomToolbar.setHidden(this.tabPanel.getActiveTab() === this.partGrid);
+		if (this.bottomToolbar) this.bottomToolbar.setHidden(this.tabPanel.getActiveTab() !== this.detailsPanel);
+	},
+	onAttachmentUploaded: function () {
+		// The upload endpoint creates a temporary file. Persist the project
+		// association now, so closing this tab cannot silently lose it.
+		if (this.record && !this.record.phantom) this._onItemSave();
 	},
 	markPartsDirty: function () {
 		this.partsSaveButton.show();
@@ -126,9 +133,20 @@ Ext.define('Limas.ProjectEditor', {
 	 * Re-bind the store after an item was saved
 	 */
 	_onItemSaved: function (record) {
-		this.bindPartsStore(record.parts());
-		this.partsSaveButton.hide();
-		this.attachmentGrid.bindStore(record.attachments());
+		let id = record.getId();
+		// The PUT response does not reliably replace ExtJS hasMany stores.
+		// Reload the saved project before binding the grids again.
+		Ext.ClassManager.get(this.model).load(id, {
+			scope: this,
+			success: function (freshRecord) {
+				if (this.destroyed || !this.record || this.record.getId() !== id) return;
+				this.record = freshRecord;
+				this.getForm().loadRecord(freshRecord);
+				this.bindPartsStore(freshRecord.parts());
+				this.attachmentGrid.bindStore(freshRecord.attachments());
+				this.partsSaveButton.hide();
+			}
+		});
 	},
 	/**
 	 * Bind the store as soon as the view was rendered
