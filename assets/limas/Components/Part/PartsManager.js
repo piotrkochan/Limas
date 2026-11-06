@@ -23,6 +23,7 @@ Ext.define('Limas.PartManager', {
 
 	selectedCategory: null,
 	activeProject: '',
+	allPartsValue: '__all__',
 	projectsLoaded: false,
 
 	initComponent: function () {
@@ -271,7 +272,7 @@ Ext.define('Limas.PartManager', {
 
 		this.projectChoices = Ext.create('Ext.data.Store', {
 			fields: ['id', 'name'],
-			data: [{id: '', name: i18n('All parts')}]
+			data: [{id: this.allPartsValue, name: i18n('All parts')}]
 		});
 		this.projectSelector = Ext.create('Ext.form.field.ComboBox', {
 			fieldLabel: i18n('Project'),
@@ -283,7 +284,7 @@ Ext.define('Limas.PartManager', {
 			queryMode: 'local',
 			forceSelection: true,
 			editable: false,
-			value: '',
+			value: this.allPartsValue,
 			listeners: {change: this.onProjectContextChange, scope: this}
 		});
 		this.grid.topToolbar.insert(
@@ -305,7 +306,7 @@ Ext.define('Limas.PartManager', {
 				let projects = Ext.decode(response.responseText);
 				this.projects = projects;
 				this.projectsLoaded = true;
-				this.projectChoices.loadData([{id: '', name: i18n('All parts')}].concat(
+				this.projectChoices.loadData([{id: this.allPartsValue, name: i18n('All parts')}].concat(
 					Ext.Array.map(projects, function (project) {
 						return {id: '/api/projects/' + project.id, name: project.name};
 					})
@@ -317,7 +318,7 @@ Ext.define('Limas.PartManager', {
 					catch (error) { preferred = ''; }
 				}
 				if (preferred && !this.projectChoices.findRecord('id', preferred, 0, false, true, true)) preferred = '';
-				this.projectSelector.setValue(preferred);
+				this.projectSelector.setValue(preferred || this.allPartsValue);
 				this.applyPendingRoute();
 				if (callback) callback();
 			},
@@ -330,8 +331,12 @@ Ext.define('Limas.PartManager', {
 		});
 	},
 	onProjectContextChange: function (selector, projectIri) {
-		if (!this.projectsLoaded || this.activeProject === projectIri) return;
-		this.activeProject = projectIri || '';
+		// ExtJS assigns a generated extModel ID to records whose id is empty.
+		// Only a real project IRI may become a server-side filter.
+		let project = typeof projectIri === 'string' && /^\/api\/projects\/[1-9]\d*$/.test(projectIri)
+			? projectIri : '';
+		if (!this.projectsLoaded || this.activeProject === project) return;
+		this.activeProject = project;
 		try { window.localStorage.setItem('limas.partmanager.project', this.activeProject); }
 		catch (error) { /* Private browsing may disable storage. */ }
 		let filters = this.store.getFilters();
@@ -386,7 +391,7 @@ Ext.define('Limas.PartManager', {
 		this.activeRouteRequest = route;
 		let project = route.project && this.projectChoices.findRecord('id', route.project, 0, false, true, true)
 			? route.project : '';
-		this.projectSelector.setValue(project);
+		this.projectSelector.setValue(project || this.allPartsValue);
 		let node = route.category
 			? this.tree.getRootNode().findChild('@id', '/api/part_categories/' + route.category, true) : null;
 		if (node) {

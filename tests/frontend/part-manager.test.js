@@ -12,7 +12,7 @@ class FilterPlugin {
 const Limas = {Util: {FilterPlugin}, getApplication: () => ({writeRoute: () => {}})};
 const Ext = {
   define: (name, definition) => { classes[name] = definition; },
-  Array: {each: (items, callback) => items.forEach(callback)},
+  Array: {each: (items, callback) => items.forEach(callback), map: (items, callback) => items.map(callback)},
   decode: JSON.parse,
   htmlEncode: text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;')
 };
@@ -55,16 +55,35 @@ Ext.create = (_name, config) => config;
 const context = {
   projectsLoaded: true,
   activeProject: '',
+  allPartsValue: manager.allPartsValue,
   store: {getFilters: () => filters},
   refreshCategoryCounts: () => {},
 };
+assert.ok(manager.allPartsValue);
 manager.onProjectContextChange.call(context, null, '/api/projects/3');
 assert.equal(context.projectContextFilter.property, 'projectParts.project');
 assert.equal(context.projectContextFilter.value, '/api/projects/3');
-manager.onProjectContextChange.call(context, null, '');
+manager.onProjectContextChange.call(context, null, manager.allPartsValue);
 assert.equal(context.activeProject, '');
 assert.equal(context.projectContextFilter, null);
 assert.equal(changes.filter(change => Array.isArray(change) && change[0] === 'remove').length, 1);
+manager.onProjectContextChange.call(context, null, 'extModel442-2');
+assert.equal(context.activeProject, '');
+assert.equal(changes.filter(change => Array.isArray(change) && change[0] === 'add').length, 1);
+
+let projectOptions;
+let selectedProjectValue;
+const choicesContext = {
+  allPartsValue: manager.allPartsValue,
+  activeProject: '',
+  projectChoices: {loadData: items => { projectOptions = items; }},
+  projectSelector: {setValue: value => { selectedProjectValue = value; }},
+  applyPendingRoute: () => {}
+};
+Ext.Ajax = {request: options => options.success.call(options.scope, {responseText: '[]'})};
+manager.loadProjects.call(choicesContext);
+assert.equal(projectOptions[0].id, manager.allPartsValue);
+assert.equal(selectedProjectValue, manager.allPartsValue);
 
 let request;
 let responseCounts;
