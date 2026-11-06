@@ -135,16 +135,8 @@ Ext.define('Limas.PartCategoryEditorWindow', {
 		this.record.save({
 			success: Ext.bind(function (response) {
 				if (wasPhantom) {
-					// First save of a new category: switch the window into
-					// edit-mode (defaults tab becomes editable, title flips)
-					// and keep it open so the user can add parameters right
-					// away — closing via the X button is the cancel path
-					this.setTitle(i18n('Edit Category'));
-					this.defaultsTab.setDisabled(false);
-					this.defaultsGrid.bindCategoryRecord(this.record);
-					this.inheritedGrid.bindCategoryRecord(this.record);
-					this.tabPanel.setActiveTab(this.defaultsTab);
 					this.fireEvent('save', response);
+					this.destroy();
 					return;
 				}
 				this.defaultsGrid.persistChanges(Ext.bind(function () {

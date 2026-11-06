@@ -97,6 +97,7 @@ Ext.define('Limas.Components.Part.AutoCategoryDialog', {
 		Ext.Ajax.request({
 			url: Limas.getBasePath() + '/api/parts/autoCategory/preview',
 			method: 'POST',
+			timeout: 90000,
 			jsonData: {parts: this.parts, proposeNew: this.proposeNew.getValue()},
 			success: Ext.bind(function (response) {
 				if (requestNumber !== this.previewRequestNumber) return;
