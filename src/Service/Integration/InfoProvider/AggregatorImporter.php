@@ -301,15 +301,20 @@ final readonly class AggregatorImporter
 		if ($canonical !== null) {
 			return $canonical;
 		}
-		// An unresolved alias may coexist with a Manufacturer created before
-		// aliases were introduced. Reuse that row before inserting a new one.
+		// canonicalize() also misses when the alias for this spelling is still
+		// unassigned, or when the stored name keeps a corporate suffix the
+		// normalised key drops ("Bourns Inc." vs "bourns"). Manufacturers created
+		// through the editor / Apply Data never register an alias, so one with
+		// this very name can still exist — inserting another would hit the
+		// unique name index (1062). Reuse it and attach the pending alias.
 		$existing = $this->em->createQueryBuilder()
 			->select('m')
 			->from(Manufacturer::class, 'm')
 			->where('LOWER(m.name) = :name')
 			->setParameter('name', mb_strtolower(trim($rawName)))
 			->setMaxResults(1)
-			->getQuery()->getOneOrNullResult();
+			->getQuery()
+			->getOneOrNullResult();
 		if ($existing instanceof Manufacturer) {
 			$this->manufacturerCanonicalizer->registerAlias($existing, $rawName);
 			return $existing;
