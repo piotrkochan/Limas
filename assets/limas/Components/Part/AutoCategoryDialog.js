@@ -1,11 +1,12 @@
 Ext.define('Limas.Components.Part.AutoCategoryDialog', {
 	extend: 'Ext.window.Window',
 	title: i18n('Auto category'),
-	width: 850,
+	width: 1100,
 	height: 550,
 	modal: true,
 	layout: {type: 'vbox', align: 'stretch'},
 	parts: null,
+	partDetails: null,
 	onSuccess: null,
 
 	initComponent: function () {
@@ -14,23 +15,31 @@ Ext.define('Limas.Components.Part.AutoCategoryDialog', {
 			margin: '10 12 8 12'
 		});
 		this.previewStore = Ext.create('Ext.data.Store', {
-			fields: ['partId', 'partName', 'current', 'target', 'categoryId', 'newCategory'],
+			fields: ['partId', 'partName', 'description', 'distributorNumber', 'target', 'categoryId', 'newCategory'],
 			data: []
 		});
 		this.previewGrid = Ext.create('Ext.grid.Panel', {
 			flex: 1,
 			store: this.previewStore,
 			selModel: {selType: 'checkboxmodel', mode: 'MULTI'},
+			viewConfig: {
+				getRowClass: function (record) {
+					return record.get('newCategory') ? 'limas-auto-category-new-row' : '';
+				}
+			},
 			columns: [
-				{text: i18n('Part'), dataIndex: 'partName', flex: 1,
+				{text: i18n('Part'), dataIndex: 'partName', flex: 1, minWidth: 140,
 					renderer: function (value) { return Ext.htmlEncode(String(value || '')); }},
-				{text: i18n('Current category'), dataIndex: 'current', flex: 1,
+				{text: i18n('Description'), dataIndex: 'description', flex: 2, minWidth: 200,
 					renderer: function (value) { return Ext.htmlEncode(String(value || '')); }},
-				{text: i18n('Suggested category'), dataIndex: 'target', flex: 1.4,
+				{text: i18n('Distributor number'), dataIndex: 'distributorNumber', flex: 1, minWidth: 150,
+					renderer: function (value) { return value || ''; }},
+				{text: i18n('Suggested category'), dataIndex: 'target', flex: 1.5, minWidth: 230,
 					renderer: function (value, metadata, record) {
 						if (!value) return '<span class="limas-text-muted">' + Ext.htmlEncode(i18n('No suggestion')) + '</span>';
-						let label = record.get('newCategory') ? i18n('New: ') : '';
-						return Ext.htmlEncode(label + value);
+						let badge = record.get('newCategory')
+							? '<span class="limas-auto-category-new-badge">' + Ext.htmlEncode(i18n('NEW')) + '</span> ' : '';
+						return badge + Ext.htmlEncode(value);
 					}}
 			]
 		});
@@ -62,7 +71,10 @@ Ext.define('Limas.Components.Part.AutoCategoryDialog', {
 			jsonData: {parts: this.parts, proposeNew: this.proposeNew.getValue()},
 			success: Ext.bind(function (response) {
 				this.unmask();
-				let rows = Ext.decode(response.responseText).rows || [];
+				let rows = (Ext.decode(response.responseText).rows || []).map(function (row) {
+					let details = this.partDetails && this.partDetails['/api/parts/' + row.partId] || {};
+					return Ext.apply({}, details, row);
+				}, this);
 				this.previewStore.loadData(rows);
 				let applicable = this.previewStore.getRange().filter(function (record) { return !!record.get('target'); });
 				this.previewGrid.getSelectionModel().select(applicable);

@@ -77,8 +77,16 @@ Ext.define('Limas.Components.Part.BulkActionsButton', {
 			Ext.Msg.alert(i18n('Auto category'), i18n('Select at most 40 parts per batch.'));
 			return;
 		}
+		let partDetails = {};
+		this.grid.getSelectionModel().getSelection().forEach(function (part) {
+			partDetails[part.get('@id')] = {
+				description: part.get('description') || '',
+				distributorNumber: this.grid.renderDistributorNumber(part)
+			};
+		}, this);
 		Ext.create('Limas.Components.Part.AutoCategoryDialog', {
 			parts: iris,
+			partDetails: partDetails,
 			onSuccess: Ext.bind(function (result) {
 				if (this.grid && this.grid.store) this.grid.store.reload();
 				let manager = Ext.getCmp('limas-partmanager');

@@ -403,6 +403,23 @@ body.limas-theme-dark .limas-lifecycle-discontinued { background: rgba(248, 113,
 .limas-status-ambiguous { background: #fde6d1;  color: #a04400; }
 .limas-status-failed    { background: #fbe1e1;  color: #a02020; }
 
+.limas-auto-category-new-row .x-grid-cell {
+    border-top: 1px solid #d39a27;
+    border-bottom: 1px solid #d39a27;
+}
+.limas-auto-category-new-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: #fff0c2;
+    color: #805000;
+    font-weight: bold;
+}
+body.limas-theme-dark .limas-auto-category-new-badge {
+    background: rgba(251, 191, 36, 0.2);
+    color: #fcd34d;
+}
+
 body.limas-theme-dark .limas-status-pending   { background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.7); }
 body.limas-theme-dark .limas-status-success   { background: rgba(74, 222, 128, 0.16); color: #6ee7a3; }
 body.limas-theme-dark .limas-status-warning   { background: rgba(251, 191, 36, 0.16); color: #fcd34d; }
