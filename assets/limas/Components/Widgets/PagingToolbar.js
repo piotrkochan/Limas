@@ -21,7 +21,7 @@ Ext.define('Limas.PagingToolbar', {
 			tooltip: i18n('Import'),
 			overflowText: i18n('Import'),
 			iconCls: 'fugue-icon database-import',
-			disabled: this.store.isLoading()
+			grid: this.grid
 		}));
 
 		items.push({xtype: 'tbseparator'});

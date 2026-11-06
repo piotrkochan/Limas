@@ -80,7 +80,9 @@ Ext.define('Limas.Components.Grid.GridPresetState', {
 			columns = decoded.columns || [];
 			filters = decoded.filters || [];
 		}
-		columns = (columns || []).map(this.materializeColumn, this);
+		columns = columns || [];
+		if (typeof grid.preparePresetColumns === 'function') columns = grid.preparePresetColumns(columns);
+		columns = columns.map(this.materializeColumn, this);
 		grid.reconfigure(grid.store, columns);
 		if (grid.store && grid.store.getFilters) {
 			let liveFilters = filters.map(function (state) {

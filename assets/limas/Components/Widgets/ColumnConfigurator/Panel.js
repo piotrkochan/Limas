@@ -75,10 +75,12 @@ Ext.define('Limas.Components.Widgets.ColumnConfigurator.Panel', {
 		this.down('#gridPresetCombo').getStore().load();
 	},
 	onPresetSelect: function (configuration) {
-		this.grid.reconfigure(this.grid.store, configuration);
+		let columns = typeof this.grid.preparePresetColumns === 'function'
+			? this.grid.preparePresetColumns(configuration) : configuration;
+		this.grid.reconfigure(this.grid.store, columns);
 		this.applyColumnConfigurationFromGrid();
 
-		this.down('#gridPresetCombo').setConfiguration(configuration);
+		this.down('#gridPresetCombo').setConfiguration(columns);
 	},
 	onColumnSelect: function (grid, record) {
 		this.editData(record);
@@ -104,6 +106,7 @@ Ext.define('Limas.Components.Widgets.ColumnConfigurator.Panel', {
 			Limas.Components.Grid.GridPresetState.materializeColumn,
 			Limas.Components.Grid.GridPresetState
 		);
+		if (typeof this.grid.preparePresetColumns === 'function') cols = this.grid.preparePresetColumns(cols);
 		this.grid.reconfigure(this.grid.store, cols);
 	},
 	getColumnConfigurations: function () {

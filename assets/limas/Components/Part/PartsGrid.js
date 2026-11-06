@@ -528,6 +528,30 @@ Ext.define('Limas.PartsGrid', {
 		}
 		Limas.printLabelSheet({parts: ids});
 	},
+	preparePresetColumns: function (columns) {
+		let defaults = this.getDefaultColumnConfiguration();
+		let distributorColumns = defaults.filter(function (column) {
+			return column.dataIndex === 'distributorNumbers';
+		});
+		let label = function (column) { return column.text || column.header; };
+		let priceLabel = i18n('Distributor price');
+		let numberLabel = i18n('Distributor number');
+		let prepared = columns.filter(function (column) {
+			return column.dataIndex !== 'averagePrice' && column.dataIndex !== '@id';
+		}).map(function (column) {
+			// Saved presets keep column metadata, but omit custom renderer functions.
+			let source = distributorColumns.find(function (candidate) {
+				return label(candidate) === label(column);
+			});
+			return source ? Object.assign({}, column, {renderer: source.renderer}) : column;
+		});
+		if (!prepared.some(function (column) { return label(column) === priceLabel; })) {
+			let priceColumn = distributorColumns.find(function (column) { return label(column) === priceLabel; });
+			let numberIndex = prepared.findIndex(function (column) { return label(column) === numberLabel; });
+			if (priceColumn) prepared.splice(numberIndex >= 0 ? numberIndex + 1 : prepared.length, 0, priceColumn);
+		}
+		return prepared;
+	},
 	defineColumns: function () {
 		let grid = this;
 		this.columns = [
@@ -617,13 +641,6 @@ Ext.define('Limas.PartsGrid', {
 					rtype: 'stockLevel'
 				}]
 			}, {
-				header: i18n('Avg. Price'),
-				dataIndex: 'averagePrice',
-				align: 'right',
-				renderers: [{
-					rtype: 'currency'
-				}]
-			}, {
 				header: i18n('Footprint'),
 				dataIndex: 'footprint.name'
 			}, {
@@ -634,12 +651,6 @@ Ext.define('Limas.PartsGrid', {
 				header: i18n('Create Date'),
 				dataIndex: 'createDate',
 				hidden: true
-			}, {
-				header: i18n('Internal ID'),
-				dataIndex: '@id',
-				renderers: [{
-					rtype: 'internalID'
-				}]
 			}
 		];
 	},

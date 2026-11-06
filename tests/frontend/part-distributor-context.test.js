@@ -64,6 +64,15 @@ const priceCell = {};
 assert.equal(grid.renderDistributorPrice(part, priceCell), '0.0127 USD (50+)');
 assert.match(priceCell.tdAttr, /500\+: 0\.011 USD/);
 gridClass.defineColumns.call(grid);
+grid.getDefaultColumnConfiguration = () => grid.columns;
+const presetColumns = gridClass.preparePresetColumns.call(grid, [
+  {text: 'Avg. Price', dataIndex: 'averagePrice'},
+  {text: 'Distributor number', dataIndex: 'distributorNumbers'},
+  {text: 'Internal ID', dataIndex: '@id'}
+]);
+assert.deepEqual(presetColumns.map(item => item.text || item.header), ['Distributor number', 'Distributor price']);
+assert.equal(presetColumns[0].renderer('[object Object]', {}, part).includes('C25862'), true);
+assert.equal(presetColumns[1].renderer('[object Object]', {}, part), '0.0127 USD (50+)');
 const column = grid.columns.find(item => item.dataIndex === 'distributorNumbers');
 const cell = column.renderer('[object Object]', {}, part);
 assert.match(cell, /distributor-icon lcsc/);

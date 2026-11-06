@@ -148,7 +148,7 @@ Ext.define('Limas.ProjectPartGrid', {
 				itemId: 'import',
 				tooltip: i18n('Import'),
 				iconCls: 'fugue-icon database-import',
-				disabled: this.store.isLoading()
+				grid: this
 			})
 		];
 
