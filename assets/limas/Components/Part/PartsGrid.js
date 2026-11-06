@@ -1,6 +1,13 @@
 Ext.define('Limas.PartsGrid', {
 	extend: 'Limas.EditorGrid',
 	alias: 'widget.PartsGrid',
+	cls: 'limas-parts-grid',
+	selModel: {
+		selType: 'checkboxmodel',
+		mode: 'MULTI',
+		checkOnly: false,
+		showHeaderCheckbox: true
+	},
 
 	/**
 	 * Display button texts by default
@@ -37,6 +44,7 @@ Ext.define('Limas.PartsGrid', {
 	 * @todo Check if this messes up with the Part drop down in the project view
 	 */
 	viewConfig: {
+		enableTextSelection: true,
 		plugins: {
 			ddGroup: 'CategoryTree',
 			ptype: 'gridviewdragdrop',
@@ -93,6 +101,7 @@ Ext.define('Limas.PartsGrid', {
 
 		// Initialize the panel
 		this.callParent();
+		this.getView().on('beforeitemmousedown', this.onBeforePartMouseDown, this);
 
 		this.bottomToolbar.add({
 			xtype: 'button',
@@ -113,6 +122,23 @@ Ext.define('Limas.PartsGrid', {
 				click: this.groupingFeature.collapseAll
 			}
 		});
+		this.selectPageButton = Ext.create('Ext.button.Button', {
+			text: i18n('Select page'),
+			tooltip: i18n('Select all parts on this page'),
+			handler: Ext.bind(function () { this.getSelectionModel().selectAll(); }, this)
+		});
+		this.clearSelectionButton = Ext.create('Ext.button.Button', {
+			text: i18n('Clear selection'),
+			handler: Ext.bind(function () { this.getSelectionModel().deselectAll(); }, this)
+		});
+		this.selectedCountItem = Ext.create('Ext.toolbar.TextItem', {text: ''});
+		this.bottomToolbar.add('->');
+		this.bottomToolbar.add(this.selectPageButton);
+		this.bottomToolbar.add(this.clearSelectionButton);
+		this.bottomToolbar.add(this.selectedCountItem);
+		this.getSelectionModel().on('selectionchange', this.updateSelectionStatus, this);
+		this.store.on('load', this.updateSelectionStatus, this);
+		this.updateSelectionStatus();
 
 		this.bottomToolbar.insert(this.bottomToolbar.items.indexOf(this.bottomToolbar.down('#addFilter')), {
 			xtype: 'button',
@@ -270,6 +296,19 @@ Ext.define('Limas.PartsGrid', {
 		this.store.on('beforeload', this._injectIncludeParameters, this);
 		this._enableDistributorNumbers();
 		this.on('reconfigure', this._refreshIncludeParameters, this);
+	},
+	onBeforePartMouseDown: function (view, record, item, index, event) {
+		// Shift-click selects a row range. Stop only the browser's native
+		// text-range gesture; ordinary drag-to-copy remains available.
+		if (event.shiftKey && event.button === 0) event.preventDefault();
+	},
+	updateSelectionStatus: function () {
+		let selectionModel = this.getSelectionModel();
+		let selected = selectionModel.getCount();
+		let onPage = this.store.getRange();
+		this.selectedCountItem.setText(i18n('Selected') + ': ' + selected);
+		this.clearSelectionButton.setDisabled(selected === 0);
+		this.selectPageButton.setDisabled(onPage.length === 0 || onPage.every(function (part) { return selectionModel.isSelected(part); }));
 	},
 	readCatalogPreference: function (key, fallback) {
 		try { return window.localStorage.getItem('limas.parts.catalog.' + key) || fallback; }

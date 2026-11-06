@@ -352,6 +352,21 @@ body.limas-theme-dark {
     background-color: var(--limas-box-warning-border) !important;
 }
 
+/* Keep selected parts obvious, including rows tinted for low stock. Text
+ * remains selectable because only the row background changes. */
+.limas-parts-grid .x-grid-item-selected .x-grid-cell,
+.limas-parts-grid .x-grid-item-selected .x-grid-cell-inner,
+.limas-parts-grid .x-grid-row-selected .x-grid-cell,
+.limas-parts-grid .x-grid-row-selected .x-grid-cell-inner {
+    background-color: #cfe6ff !important;
+}
+body.limas-theme-dark .limas-parts-grid .x-grid-item-selected .x-grid-cell,
+body.limas-theme-dark .limas-parts-grid .x-grid-item-selected .x-grid-cell-inner,
+body.limas-theme-dark .limas-parts-grid .x-grid-row-selected .x-grid-cell,
+body.limas-theme-dark .limas-parts-grid .x-grid-row-selected .x-grid-cell-inner {
+    background-color: #244c70 !important;
+}
+
 .limas-dropzone {
     border: 2px dashed var(--limas-border-subtle);
     border-radius: 6px;
