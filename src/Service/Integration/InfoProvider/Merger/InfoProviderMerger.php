@@ -162,7 +162,9 @@ final class InfoProviderMerger
 				categoryName: $r->categoryName,
 				stock: $r->stock,
 				currency: $r->currency,
-				priceBreaks: $r->priceBreaks
+				priceBreaks: $r->priceBreaks,
+				rohsStatus: $r->rohsStatus,
+				assemblyClass: $r->assemblyClass
 			);
 			$parameters[$src] = $r->parameters;
 		}

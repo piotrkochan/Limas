@@ -55,6 +55,12 @@ class PartDistributor
 	#[ORM\Column(type: Types::JSON, nullable: true)]
 	#[Groups(['default'])]
 	private ?array $priceBreaks = null;
+	#[ORM\Column(type: Types::STRING, length: 32, nullable: true)]
+	#[Groups(['default'])]
+	private ?string $rohsStatus = null;
+	#[ORM\Column(type: Types::STRING, length: 32, nullable: true)]
+	#[Groups(['default'])]
+	private ?string $assemblyClass = null;
 	#[ORM\Column(type: Types::BOOLEAN, nullable: true)]
 	#[Groups(['default'])]
 	private ?bool $ignoreForReports = false;
@@ -155,6 +161,34 @@ class PartDistributor
 	public function getPriceBreaks(): array
 	{
 		return $this->priceBreaks ?? [];
+	}
+
+	public function getRohsStatus(): ?string
+	{
+		return $this->rohsStatus;
+	}
+
+	public function setRohsStatus(?string $status): self
+	{
+		if ($status !== null && !in_array($status, ['certified', 'not_certified'], true)) {
+			throw new \InvalidArgumentException('Invalid RoHS status');
+		}
+		$this->rohsStatus = $status;
+		return $this;
+	}
+
+	public function getAssemblyClass(): ?string
+	{
+		return $this->assemblyClass;
+	}
+
+	public function setAssemblyClass(?string $assemblyClass): self
+	{
+		if ($assemblyClass !== null && !in_array($assemblyClass, ['basic', 'extended'], true)) {
+			throw new \InvalidArgumentException('Invalid assembly class');
+		}
+		$this->assemblyClass = $assemblyClass;
+		return $this;
 	}
 
 	/** @param list<array{quantity: int|string, price: int|float|string}>|null $breaks */

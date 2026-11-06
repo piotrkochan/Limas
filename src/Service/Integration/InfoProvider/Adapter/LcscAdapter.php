@@ -330,10 +330,17 @@ final class LcscAdapter
 			currency: $this->currency,
 			parameters: $this->mapParameters($r['paramVOList'] ?? []),
 			priceBreaks: $this->mapPriceBreaks($r['productPriceList'] ?? []),
+			rohsStatus: is_bool($r['isRohsCert'] ?? null)
+				? ($r['isRohsCert'] ? 'certified' : 'not_certified') : null,
+			assemblyClass: match (strtoupper((string)($r['smtLabel'] ?? ''))) {
+				'BASE' => 'basic',
+				'EXPAND' => 'extended',
+				default => null
+			},
 			rawSource: [
 				'lcsc_code' => $lcscCode,
-				'is_basic' => $r['isHot'] ?? null,
-				'rohs' => $r['isEnvironment'] ?? null
+				'smt_label' => $r['smtLabel'] ?? null,
+				'rohs_cert_type' => $r['rohsCertType'] ?? null
 			]
 		);
 	}

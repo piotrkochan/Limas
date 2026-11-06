@@ -30,6 +30,10 @@ Ext.define('Limas.Components.Part.BulkActionsButton', {
 					text: i18n('Update prices'),
 					iconCls: 'fugue-icon money-coin',
 					handler: Ext.bind(this.onRefreshPricesClick, this)
+				}, {
+					text: i18n('Update distributor data…'),
+					iconCls: 'web-icon lorry',
+					handler: Ext.bind(this.onRefreshDataClick, this)
 				}
 			]
 		});
@@ -106,6 +110,20 @@ Ext.define('Limas.Components.Part.BulkActionsButton', {
 	},
 	onRefreshPricesClick: function () {
 		this.refreshPrices(this.getSelectedIris());
+	},
+	onRefreshDataClick: function () {
+		this.refreshData(this.getSelectedIris());
+	},
+	refreshData: function (iris) {
+		if (!iris || !iris.length) return;
+		if (iris.length > 100) {
+			Ext.Msg.alert(i18n('Update distributor data'), i18n('Select at most 100 parts per batch.'));
+			return;
+		}
+		Ext.create('Limas.Components.Part.DistributorDataRefreshDialog', {
+			parts: iris,
+			onSuccess: Ext.bind(function () { this.grid.store.reload(); }, this)
+		}).show();
 	},
 	refreshPrices: function (iris) {
 		if (!iris || !iris.length) return;

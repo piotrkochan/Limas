@@ -513,6 +513,11 @@ Ext.define('Limas.PartManager', {
 				this.grid.bulkActionsButton.refreshPrices([record.get('@id')]);
 			}, this)
 		}, {
+			text: i18n('Update distributor data…'), iconCls: 'web-icon lorry',
+			handler: Ext.bind(function () {
+				this.grid.bulkActionsButton.refreshData([record.get('@id')]);
+			}, this)
+		}, {
 			text: i18n('Open in LCSC'), iconCls: 'distributor-icon lcsc',
 			disabled: !lcscUrl,
 			handler: function () { window.open(lcscUrl, '_blank', 'noopener,noreferrer'); }
@@ -797,6 +802,14 @@ Ext.define('Limas.PartManager', {
 	onPartSaved: function (record) {
 		this.detail.setValues(record);
 		this.refreshCategoryCounts();
+		let savedId = record.getId();
+		this.grid.getStore().reload({
+			scope: this,
+			callback: function (rows) {
+				let updated = (rows || []).find(function (row) { return row.getId() === savedId; });
+				if (updated) this.grid.getSelectionModel().select(updated);
+			}
+		});
 	},
 	/**
 	 * Called when a part was selected in the grid. Displays the details for this part.

@@ -20,7 +20,9 @@ final readonly class ProviderSpecific
 		public ?int                                                              $stock,
 		public ?string                                                           $currency,
 		/** @var PriceBreak[] */
-		public array                                                             $priceBreaks
+		public array                                                             $priceBreaks,
+		public ?string                                                          $rohsStatus = null,
+		public ?string                                                          $assemblyClass = null
 	)
 	{
 	}

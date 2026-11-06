@@ -115,7 +115,9 @@ final readonly class AggregatorImporter
 			$pd = (new PartDistributor)
 				->setDistributor($distributor)
 				->setSku($ds->sourceSku)
-				->setOrderNumber($ds->sourceSku);
+				->setOrderNumber($ds->sourceSku)
+				->setRohsStatus($ds->rohsStatus)
+				->setAssemblyClass($ds->assemblyClass);
 			$breaks = [];
 			foreach ($ds->priceBreaks as $break) {
 				if ($break->quantity > 0 && is_finite($break->price) && $break->price >= 0) {

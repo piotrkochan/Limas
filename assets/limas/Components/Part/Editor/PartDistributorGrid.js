@@ -116,6 +116,38 @@ Ext.define('Limas.PartDistributorGrid', {
 					return Ext.htmlEncode(label);
 				}
 			}, {
+				header: i18n('RoHS'),
+				dataIndex: 'rohsStatus',
+				width: 120,
+				renderer: function (value) {
+					return Ext.htmlEncode(value === 'certified' ? i18n('Certified')
+						: value === 'not_certified' ? i18n('No certificate') : i18n('Unknown'));
+				},
+				editor: {
+					xtype: 'combobox', displayField: 'label', valueField: 'value',
+					store: {fields: ['value', 'label'], data: [
+						{value: null, label: i18n('Unknown')},
+						{value: 'certified', label: i18n('Certified')},
+						{value: 'not_certified', label: i18n('No certificate')}
+					]}, queryMode: 'local', forceSelection: true, editable: false
+				}
+			}, {
+				header: i18n('Assembly class'),
+				dataIndex: 'assemblyClass',
+				width: 120,
+				renderer: function (value) {
+					return Ext.htmlEncode(value === 'basic' ? i18n('Basic')
+						: value === 'extended' ? i18n('Extended') : i18n('Unknown'));
+				},
+				editor: {
+					xtype: 'combobox', displayField: 'label', valueField: 'value',
+					store: {fields: ['value', 'label'], data: [
+						{value: null, label: i18n('Unknown')},
+						{value: 'basic', label: i18n('Basic')},
+						{value: 'extended', label: i18n('Extended')}
+					]}, queryMode: 'local', forceSelection: true, editable: false
+				}
+			}, {
 				header: i18n('Currency'),
 				dataIndex: 'currency',
 				editor: {

@@ -34,7 +34,9 @@ class InfoProviderResult
 		/** @var PriceBreak[] */
 		public readonly array                                             $priceBreaks = [],
 		/** Whole raw payload from the provider for debugging / future fields */
-		public readonly ?array                                            $rawSource = null
+		public readonly ?array                                            $rawSource = null,
+		public readonly ?string                                           $rohsStatus = null,
+		public readonly ?string                                           $assemblyClass = null
 	)
 	{
 		parent::__construct(
