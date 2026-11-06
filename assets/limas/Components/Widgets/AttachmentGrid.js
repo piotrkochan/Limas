@@ -40,6 +40,13 @@ Ext.define('Limas.AttachmentGrid', {
 			iconCls: 'web-icon zoom',
 			disabled: true
 		});
+		this.downloadButton = Ext.create('Ext.button.Button', {
+			text: i18n('Download'),
+			handler: this.onDownloadClick,
+			scope: this,
+			iconCls: 'fugue-icon drive-download',
+			disabled: true
+		});
 
 		this.openUrlButton = Ext.create('Ext.button.Button', {
 			text: i18n('Open URL'),
@@ -69,6 +76,7 @@ Ext.define('Limas.AttachmentGrid', {
 					},
 					this.webcamButton,
 					this.viewButton,
+					this.downloadButton,
 					this.deleteButton,
 					this.openUrlButton
 				]
@@ -185,6 +193,7 @@ Ext.define('Limas.AttachmentGrid', {
 		let allDownloaded = selections.length > 0 && selections.every(r => r.get('downloaded') !== false);
 		let anyUrlOnly = selections.some(r => r.get('downloaded') === false);
 		this.viewButton.setDisabled(!allDownloaded);
+		this.downloadButton.setDisabled(selections.length !== 1 || !allDownloaded);
 		this.openUrlButton.setHidden(!anyUrlOnly);
 		// Post-CAS the attachment serialises with `sourceUrls: string[]`
 		// (Blob can have N provenance URLs). Open URL acts on the first
@@ -198,6 +207,28 @@ Ext.define('Limas.AttachmentGrid', {
 		if (selection && selection.get('downloaded') !== false) {
 			this.viewAttachment(selection);
 		}
+	},
+	onDownloadClick: function () {
+		let record = this.getView().getSelectionModel().getSelection()[0];
+		if (!record || record.get('downloaded') === false) return;
+		fetch(record.getId() + '/getFile', {
+			credentials: 'same-origin',
+			headers: Limas.Auth.AuthenticationProvider.getAuthenticationProvider().getHeaders()
+		}).then(function (response) {
+			if (!response.ok) throw new Error('HTTP ' + response.status);
+			return response.blob();
+		}).then(function (blob) {
+			let url = URL.createObjectURL(blob);
+			let link = document.createElement('a');
+			link.href = url;
+			link.download = record.get('originalFilename') || 'attachment';
+			document.body.appendChild(link);
+			link.click();
+			link.remove();
+			window.setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+		}).catch(function () {
+			Ext.Msg.alert(i18n('Download failed'), i18n('Could not download attachment.'));
+		});
 	},
 	onOpenUrlClick: function () {
 		let selection = this.getView().getSelectionModel().getSelection()[0];
@@ -219,7 +250,7 @@ Ext.define('Limas.AttachmentGrid', {
 	},
 	viewAttachment: function (record) {
 		let filename = String(record.get('originalFilename') || '');
-		if (/\.(csv|tsv)$/i.test(filename)) {
+		if (/\.(csv|tsv)$/i.test(filename) || /^(text\/(csv|tab-separated-values)|application\/csv)/i.test(String(record.get('mimetype') || ''))) {
 			this.viewTextAttachment(record);
 			return;
 		}
@@ -246,10 +277,8 @@ Ext.define('Limas.AttachmentGrid', {
 	viewTextAttachment: function (record) {
 		// getFile intentionally sends CSV as an attachment for browser safety.
 		// Fetch the bytes with XHR and escape them before showing text here.
-		let viewer = Ext.create('Ext.Component', {
-			padding: 12,
-			autoScroll: true,
-			html: Ext.htmlEncode(i18n('Loading…'))
+		let viewer = Ext.create('Ext.panel.Panel', {
+			layout: 'fit', html: Ext.htmlEncode(i18n('Loading…'))
 		});
 		let win = Ext.create('Ext.window.Window', {
 			title: record.get('originalFilename') || i18n('Display File'),
@@ -265,12 +294,59 @@ Ext.define('Limas.AttachmentGrid', {
 			url: record.getId() + '/getFile',
 			method: 'GET',
 			success: function (response) {
-				if (!win.destroyed) viewer.update('<pre style="white-space:pre;overflow:auto;user-select:text">'
-					+ Ext.htmlEncode(response.responseText) + '</pre>');
+				if (win.destroyed) return;
+				let rows = this.parseAttachmentCsv(response.responseText);
+				if (!rows.length) {
+					viewer.update(Ext.htmlEncode(i18n('CSV file is empty.')));
+					return;
+				}
+				let headers = rows.shift();
+				let limit = 2000;
+				let fields = headers.map(function (value, index) { return 'column' + index; });
+				let data = rows.slice(0, limit).map(function (row) {
+					let result = {};
+					fields.forEach(function (field, index) { result[field] = row[index] || ''; });
+					return result;
+				});
+				let table = Ext.create('Ext.grid.Panel', {
+				store: Ext.create('Ext.data.Store', {fields: fields, data: data}),
+				columnLines: true,
+				viewConfig: {stripeRows: true},
+				columns: fields.map(function (field, index) {
+					return {text: Ext.htmlEncode(headers[index] || ('#' + (index + 1))), dataIndex: field,
+						width: 180, renderer: function (value) { return Ext.htmlEncode(String(value || '')); }};
+				}),
+				bbar: [{xtype: 'tbtext', text: Ext.String.format(i18n('Showing {0} of {1} rows'), data.length, rows.length)}]
+			});
+			viewer.removeAll();
+			viewer.update('');
+			viewer.add(table);
 			},
+			scope: this,
 			failure: function () {
 				if (!win.destroyed) viewer.update(Ext.htmlEncode(i18n('Could not load attachment.')));
 			}
 		});
+	},
+	parseAttachmentCsv: function (text) {
+		if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+		let firstLine = text.split(/\r?\n/, 1)[0];
+		let delimiter = [',', ';', '\t', '|'].sort(function (a, b) {
+			return firstLine.split(b).length - firstLine.split(a).length;
+		})[0];
+		let rows = [], row = [], cell = '', quoted = false;
+		for (let i = 0; i < text.length; i++) {
+			let char = text.charAt(i);
+			if (quoted) {
+				if (char === '"' && text.charAt(i + 1) === '"') { cell += '"'; i++; }
+				else if (char === '"') quoted = false;
+				else cell += char;
+			} else if (char === '"' && cell === '') quoted = true;
+			else if (char === delimiter) { row.push(cell); cell = ''; }
+			else if (char === '\n') { row.push(cell.replace(/\r$/, '')); rows.push(row); row = []; cell = ''; }
+			else cell += char;
+		}
+		if (cell !== '' || row.length) { row.push(cell.replace(/\r$/, '')); rows.push(row); }
+		return rows.filter(function (entry) { return entry.some(function (value) { return value !== ''; }); });
 	}
 });
