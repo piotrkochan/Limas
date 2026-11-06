@@ -107,6 +107,10 @@ class Part
 	#[Groups(['default'])]
 	#[ApiProperty(readableLink: true, writableLink: true)]
 	private ?Footprint $footprint = null;
+	/** Supplier's package/footprint name, retained even when no canonical Footprint matches. */
+	#[ORM\Column(type: Types::STRING, length: 255, nullable: true)]
+	#[Groups(['default'])]
+	private ?string $catalogPackage = null;
 	#[ORM\ManyToOne(targetEntity: PartMeasurementUnit::class, inversedBy: 'parts')]
 	#[Groups(['default'])]
 	#[ApiProperty(readableLink: true, writableLink: true)]
@@ -281,7 +285,7 @@ class Part
 		return $this;
 	}
 
-	/** @return array<string, array{sku: ?string, orderNumber: ?string}> */
+	/** @return array<string, array{sku: ?string, orderNumber: ?string, price: ?string, currency: ?string, priceBreaks: array}> */
 	public function getDistributorNumbers(): array
 	{
 		return $this->distributorNumbers;
@@ -414,6 +418,17 @@ class Part
 	public function setFootprint(?Footprint $footprint): self
 	{
 		$this->footprint = $footprint;
+		return $this;
+	}
+
+	public function getCatalogPackage(): ?string
+	{
+		return $this->catalogPackage;
+	}
+
+	public function setCatalogPackage(?string $catalogPackage): self
+	{
+		$this->catalogPackage = $catalogPackage === null ? null : mb_substr(trim($catalogPackage), 0, 255);
 		return $this;
 	}
 

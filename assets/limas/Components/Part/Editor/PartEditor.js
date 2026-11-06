@@ -114,6 +114,13 @@ Ext.define('Limas.PartEditor', {
 			},
 			this.storageLocationComboBox,
 			{
+				xtype: 'textfield',
+				fieldLabel: i18n('Catalog package'),
+				name: 'catalogPackage',
+				maxLength: 255,
+				tooltip: i18n('Package or footprint name from the supplier catalog')
+			},
+			{
 				xtype: 'fieldcontainer',
 				layout: 'hbox',
 				fieldLabel: i18n('Footprint'),
@@ -513,6 +520,9 @@ Ext.define('Limas.PartEditor', {
 	},
 	bindChildStores: function () {
 		this.partDistributorGrid.bindStore(this.record.distributors());
+		if (this.record.distributors().getCount() === 1) {
+			this.partDistributorGrid.getSelectionModel().select(0);
+		}
 		this.partManufacturerGrid.bindStore(this.record.manufacturers());
 		this.partAttachmentGrid.bindStore(this.record.attachments());
 		this.partParameterGrid.bindStore(this.record.parameters());

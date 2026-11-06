@@ -66,6 +66,9 @@ final readonly class PartPriceRefreshActions
 						if (!$details || strcasecmp(trim($details->sourceSku), $sku) !== 0) {
 							$reason = 'No exact SKU match';
 						} else {
+							if (!$part->getCatalogPackage() && $details->packageName) {
+								$part->setCatalogPackage($details->packageName);
+							}
 							$breaks = [];
 							foreach ($details->priceBreaks as $break) {
 								if ($break->quantity > 0 && is_finite($break->price) && $break->price >= 0) {

@@ -7,6 +7,7 @@ Ext.define('Limas.PartDistributorGrid', {
 		mode: 'MULTI'
 	},
 	initComponent: function () {
+		let grid = this;
 		this.store = Ext.create('Ext.data.Store', {
 			model: 'Limas.Entity.PartDistributor',
 			proxy: {
@@ -90,9 +91,11 @@ Ext.define('Limas.PartDistributorGrid', {
 				header: i18n('Price per Item'),
 				dataIndex: 'price',
 				flex: 1,
-				tooltip: i18n('Base price; quantity price breaks take precedence in BOM calculations'),
+				tooltip: i18n('Price at the first quantity tier; price breaks take precedence in BOM calculations'),
 				renderer: function (val, m, rec) {
-					return Limas.getApplication().formatCurrency(val, rec.get('currency'));
+					let breaks = rec.get('priceBreaks') || [];
+					let price = breaks.length ? breaks[0].price : val;
+					return Ext.htmlEncode(grid.formatExactPrice(price, rec.get('currency')));
 				},
 				editor: {
 					xtype: 'CurrencyField',
@@ -104,11 +107,13 @@ Ext.define('Limas.PartDistributorGrid', {
 				flex: 2,
 				sortable: false,
 				renderer: function (value, metadata, record) {
-					if (!Ext.isArray(value) || value.length === 0) return '';
+					if (!Ext.isArray(value) || value.length === 0) return Ext.htmlEncode(i18n('Add price breaks…'));
 					let currency = record.get('currency') || '';
-					return Ext.Array.map(value, function (entry) {
-						return Ext.htmlEncode(String(entry.quantity) + '+: ' + String(entry.price) + ' ' + currency);
+					let label = Ext.Array.map(value, function (entry) {
+						return String(entry.quantity) + '+: ' + grid.formatExactPrice(entry.price, currency);
 					}).join('; ');
+					metadata.tdAttr = 'data-qtip="' + Ext.htmlEncode(label) + '"';
+					return Ext.htmlEncode(label);
 				}
 			}, {
 				header: i18n('Currency'),
@@ -175,6 +180,11 @@ Ext.define('Limas.PartDistributorGrid', {
 		this.getSelectionModel().on('selectionchange',
 			this.onSelectChange,
 			this);
+	},
+	formatExactPrice: function (value, currency) {
+		if (value === null || value === undefined || value === '') return '';
+		let number = String(value).replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '');
+		return number + (currency ? ' ' + currency : '');
 	},
 	onAddClick: function () {
 		this.editing.cancelEdit();

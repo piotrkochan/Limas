@@ -17,6 +17,7 @@ const Ext = {
     contains: (items, value) => items.includes(value),
     each: (items, callback, scope) => items.forEach(item => callback.call(scope, item))
   },
+  isArray: Array.isArray,
   Object: {each: (object, callback) => Object.entries(object).forEach(([key, value]) => callback(key, value))},
   data: {StoreManager: {lookup: () => distributorStore}},
   htmlEncode: value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;')
@@ -25,14 +26,18 @@ const context = {Ext, i18n: text => text, window: {
   open: (...args) => opened.push(args),
   getComputedStyle: () => ({font: '14px sans-serif'})
 }};
-for (const filename of ['PartsGrid.js', 'PartsManager.js']) {
+for (const filename of ['PartsGrid.js', 'PartsManager.js', 'Editor/PartDistributorGrid.js']) {
   const file = path.join(__dirname, '../../assets/limas/Components/Part', filename);
   vm.runInNewContext(fs.readFileSync(file, 'utf8'), context, {filename: file});
 }
 
 const part = {get: key => key === 'distributorNumbers'
-  ? {'/api/distributors/30': {sku: 'C25862', orderNumber: 'C25862'}} : null};
+  ? {'/api/distributors/30': {
+    sku: 'C25862', orderNumber: 'C25862', price: '0.0127', currency: 'USD',
+    priceBreaks: [{quantity: 50, price: '0.01270000'}, {quantity: 500, price: '0.01100000'}]
+  }} : null};
 const gridClass = classes['Limas.PartsGrid'];
+assert.equal(classes['Limas.PartDistributorGrid'].formatExactPrice('0.01270000', 'USD'), '0.0127 USD');
 let selectorWidth;
 gridClass.fitCatalogSelector({
   rendered: true,
@@ -50,10 +55,14 @@ const grid = {
   getLcscProductUrl: record => gridClass.getLcscProductUrl.call(grid, record),
   getDistributorNumberInfo: record => gridClass.getDistributorNumberInfo.call(grid, record),
   renderDistributorNumber: record => gridClass.renderDistributorNumber.call(grid, record),
+  renderDistributorPrice: (record, metadata) => gridClass.renderDistributorPrice.call(grid, record, metadata),
   fitCatalogSelector: () => {}
 };
 assert.equal(grid.getLcscProductUrl(part), 'https://www.lcsc.com/product-detail/C25862.html');
 assert.equal(grid.getDistributorNumberInfo(part).number, 'C25862');
+const priceCell = {};
+assert.equal(grid.renderDistributorPrice(part, priceCell), '0.0127 USD (50+)');
+assert.match(priceCell.tdAttr, /500\+: 0\.011 USD/);
 gridClass.defineColumns.call(grid);
 const column = grid.columns.find(item => item.dataIndex === 'distributorNumbers');
 const cell = column.renderer('[object Object]', {}, part);

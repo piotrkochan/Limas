@@ -290,7 +290,7 @@ class PartActions
 		return $this->json(['partId' => $id, 'projectId' => $projectId, 'included' => $request->isMethod('PUT')]);
 	}
 
-	/** Fetch all supplier identifiers for one list page in a single query. */
+	/** Fetch supplier identifiers and current prices for one list page in a single query. */
 	private function attachDistributorNumbers(array $parts): void
 	{
 		$byId = [];
@@ -315,11 +315,18 @@ class PartActions
 			/** @var PartDistributor $pd */
 			$pd = $row[0];
 			$key = '/api/distributors/' . $pd->getDistributor()->getId();
-			$current = $numbers[$row['partId']][$key] ?? ['sku' => null, 'orderNumber' => null];
-			$numbers[$row['partId']][$key] = [
-				'sku' => $current['sku'] ?: $pd->getSku(),
-				'orderNumber' => $current['orderNumber'] ?: $pd->getOrderNumber()
-			];
+			$current = $numbers[$row['partId']][$key] ?? null;
+			// Keep the number and price from the same offer. If a distributor
+			// has several rows, prefer the first one with an actual price.
+			if ($current === null || ($current['price'] === null && $pd->getPrice() !== null)) {
+				$numbers[$row['partId']][$key] = [
+					'sku' => $pd->getSku(),
+					'orderNumber' => $pd->getOrderNumber(),
+					'price' => $pd->getPrice(),
+					'currency' => $pd->getCurrency(),
+					'priceBreaks' => $pd->getPriceBreaks()
+				];
+			}
 		}
 		foreach ($byId as $id => $part) {
 			$part->setDistributorNumbers($numbers[$id] ?? []);

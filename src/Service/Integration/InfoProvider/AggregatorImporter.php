@@ -96,6 +96,7 @@ final readonly class AggregatorImporter
 		// manually OR a later improvement adds auto-create unverified alias).
 		$rawPackage = $candidate->packageName->chosenValue ?? '';
 		if ($rawPackage !== '') {
+			$part->setCatalogPackage($rawPackage);
 			$footprint = $this->footprintCanonicalizer->canonicalize($rawPackage);
 			if ($footprint !== null) {
 				$part->setFootprint($footprint);

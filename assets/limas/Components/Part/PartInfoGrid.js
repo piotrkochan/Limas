@@ -16,6 +16,9 @@ Ext.define('Limas.Components.Part.PartInfoGrid', {
 		'footprint.name': {
 			displayName: i18n('Footprint')
 		},
+		catalogPackage: {
+			displayName: i18n('Catalog package')
+		},
 		'storageLocation.name': {
 			displayName: i18n('Storage Location')
 		},
@@ -67,6 +70,9 @@ Ext.define('Limas.Components.Part.PartInfoGrid', {
 		},
 		'footprint.name': {
 			displayName: i18n('Footprint')
+		},
+		catalogPackage: {
+			displayName: i18n('Catalog package')
 		},
 		'storageLocation.name': {
 			displayName: i18n('Storage Location')

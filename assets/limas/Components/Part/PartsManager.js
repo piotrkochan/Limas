@@ -767,16 +767,13 @@ Ext.define('Limas.PartManager', {
 	onEditPart: function (part) {
 		let editorWindow = Ext.create(part.get('metaPart') === true ? 'Limas.Components.Part.Editor.MetaPartEditorWindow' : 'Limas.PartEditorWindow');
 		editorWindow.editor.on('partSaved', this.onPartSaved, this);
-		if (part._detailLoaded) {
-			editorWindow.editor.editItem(part);
+		// Distributor prices can change via a bulk refresh while a part's
+		// detail panel remains open. Always load the current server copy.
+		this.loadPart(part.getId(), function (record) {
+			record._detailLoaded = true;
+			editorWindow.editor.editItem(record);
 			editorWindow.show();
-		} else {
-			this.loadPart(part.getId(), function (record) {
-				record._detailLoaded = true;
-				editorWindow.editor.editItem(record);
-				editorWindow.show();
-			});
-		}
+		});
 	},
 	onNewPartSaved: function () {
 		this.grid.getStore().reload();

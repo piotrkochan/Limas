@@ -412,6 +412,24 @@ Ext.define('Limas.PartsGrid', {
 		let content = icon + Ext.htmlEncode(info.number);
 		return info.url ? '<a href="' + Ext.htmlEncode(info.url) + '" target="_blank" rel="noopener noreferrer">' + content + '</a>' : content;
 	},
+	renderDistributorPrice: function (record, metadata) {
+		let offer = (record.get('distributorNumbers') || {})[this.selectedDistributorId];
+		if (!offer) return '';
+		let breaks = Ext.isArray(offer.priceBreaks) ? offer.priceBreaks : [];
+		if (!breaks.length && (offer.price === null || offer.price === undefined || offer.price === '')) return '';
+		let price = breaks.length ? breaks[0].price : offer.price;
+		let exact = function (value) {
+			return String(value).replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '');
+		};
+		let currency = offer.currency || '';
+		if (breaks.length) {
+			metadata.tdAttr = 'data-qtip="' + Ext.htmlEncode(breaks.map(function (tier) {
+				return tier.quantity + '+: ' + exact(tier.price) + ' ' + currency;
+			}).join(' | ')) + '"';
+		}
+		let suffix = breaks.length && Number(breaks[0].quantity) > 1 ? ' (' + breaks[0].quantity + '+)' : '';
+		return Ext.htmlEncode(exact(price) + ' ' + currency + suffix);
+	},
 
 	_collectIncludeParameters: function () {
 		let names = [];
@@ -563,6 +581,15 @@ Ext.define('Limas.PartsGrid', {
 					// The column override HTML-encodes value before this renderer runs.
 					// Read the original map from the ExtJS record instead.
 					return grid.renderDistributorNumber(record);
+				}
+			}, {
+				header: i18n('Distributor price'),
+				dataIndex: 'distributorNumbers',
+				minWidth: 120,
+				flex: 1,
+				sortable: false,
+				renderer: function (value, metadata, record) {
+					return grid.renderDistributorPrice(record, metadata);
 				}
 			}, {
 				header: i18n('Storage Location'),
