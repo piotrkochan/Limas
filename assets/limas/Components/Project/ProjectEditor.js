@@ -3,15 +3,9 @@ Ext.define('Limas.ProjectEditor', {
 	alias: 'widget.ProjectEditor',
 
 	saveText: i18n('Save Project'),
-	defaults: {
-		anchor: '100%',
-		labelWidth: 110
-	},
-	layout: {
-		type: 'vbox',
-		align: 'stretch',
-		pack: 'start'
-	},
+	bodyPadding: 0,
+	autoScroll: false,
+	layout: 'fit',
 
 	initComponent: function () {
 		/**
@@ -38,47 +32,46 @@ Ext.define('Limas.ProjectEditor', {
 		this.store = Ext.create('Ext.data.Store', config);
 
 		this.partGrid = Ext.create('Limas.ProjectPartGrid', {
+			title: i18n('Project Parts'),
+			iconCls: 'web-icon brick',
 			store: this.store,
 			listeners: {
 				edit: this.onProjectGridEdit
 			}
 		});
 
-		let container = Ext.create('Ext.form.FieldContainer', {
-			fieldLabel: i18n('Project Parts'),
-			labelWidth: 110,
-			layout: 'fit',
-			flex: 1,
-			items: this.partGrid
-		});
-
 		this.attachmentGrid = Ext.create('Limas.ProjectAttachmentGrid', {
-			border: true
+			title: i18n('Attachments'),
+			iconCls: 'web-icon attach'
 		});
 
-		let container2 = Ext.create('Ext.form.FieldContainer', {
-			fieldLabel: i18n('Attachments'),
-			labelWidth: 110,
-			layout: 'fit',
-			flex: 1,
-			items: this.attachmentGrid
-		});
-
-		this.items = [
-			{
+		this.detailsPanel = Ext.create('Ext.panel.Panel', {
+			title: i18n('Project Details'),
+			iconCls: 'fugue-icon drill',
+			layout: 'anchor',
+			bodyPadding: 15,
+			defaults: {
+				anchor: '100%',
+				labelWidth: 150
+			},
+			items: [{
 				xtype: 'textfield',
 				name: 'name',
-				height: 20,
-				fieldLabel: i18n('Project Name')
+				fieldLabel: i18n('Project Name'),
+				allowBlank: false
 			}, {
 				xtype: 'textarea',
 				name: 'description',
 				fieldLabel: i18n('Project Description'),
-				height: 70
-			},
-			container,
-			container2
-		];
+				height: 140
+			}]
+		});
+
+		this.tabPanel = Ext.create('Ext.tab.Panel', {
+			border: false,
+			items: [this.partGrid, this.detailsPanel, this.attachmentGrid]
+		});
+		this.items = this.tabPanel;
 		this.callParent();
 	},
 	/**
@@ -117,5 +110,6 @@ Ext.define('Limas.ProjectEditor', {
 	onEditStart: function () {
 		this.partGrid.bindStore(this.record.parts());
 		this.attachmentGrid.bindStore(this.record.attachments());
+		this.tabPanel.setActiveTab(this.record.phantom ? this.detailsPanel : this.partGrid);
 	}
 });
