@@ -6,7 +6,10 @@ const vm = require('node:vm');
 const classes = {};
 const deferred = [];
 const opened = [];
-const distributors = [{get: key => key === 'name' ? 'LCSC' : '/api/distributors/30'}];
+const distributors = [
+  {get: key => key === 'name' ? 'LCSC' : '/api/distributors/30'},
+  {get: key => key === 'name' ? 'TME' : '/api/distributors/31'}
+];
 const distributorStore = {each: callback => distributors.forEach(callback)};
 let menu;
 const Ext = {
@@ -35,8 +38,12 @@ const part = {get: key => key === 'distributorNumbers'
   ? {'/api/distributors/30': {
     sku: 'C25862', orderNumber: 'C25862', price: '0.0127', currency: 'USD',
     priceBreaks: [{quantity: 50, price: '0.01270000'}, {quantity: 500, price: '0.01100000'}]
+  }, '/api/distributors/31': {
+    sku: 'SMD0402-10K-1%', price: '0.02', currency: 'EUR', priceBreaks: []
   }} : null};
 const gridClass = classes['Limas.PartsGrid'];
+assert.equal(gridClass.viewConfig.getRowClass({get: key => key === 'stockLevel' ? 0 : false}), 'limas-row-zero-stock');
+assert.equal(gridClass.viewConfig.getRowClass({get: key => key === 'stockLevel' ? 5 : false}), '');
 assert.equal(classes['Limas.PartDistributorGrid'].formatExactPrice('0.01270000', 'USD'), '0.0127 USD');
 let selectorWidth;
 gridClass.fitCatalogSelector({
@@ -49,21 +56,33 @@ gridClass.fitCatalogSelector({
 }, {each: callback => ['SKU', 'Order Number'].forEach(label => callback({get: () => label}))}, 'label');
 assert.equal(selectorWidth, 205);
 const grid = {
-  selectedDistributorId: '/api/distributors/30',
-  selectedDistributorName: 'lcsc',
+  selectedDistributorIds: null,
   selectedDistributorField: 'sku',
   getLcscProductUrl: record => gridClass.getLcscProductUrl.call(grid, record),
+  getSelectedCatalogEntries: record => gridClass.getSelectedCatalogEntries.call(grid, record),
+  getDistributorNumberInfoFor: (record, id, name) => gridClass.getDistributorNumberInfoFor.call(grid, record, id, name),
   getDistributorNumberInfo: record => gridClass.getDistributorNumberInfo.call(grid, record),
+  renderDistributorNumberInfo: info => gridClass.renderDistributorNumberInfo.call(grid, info),
   renderDistributorNumber: record => gridClass.renderDistributorNumber.call(grid, record),
+  renderDistributorPriceFor: (record, id, metadata) => gridClass.renderDistributorPriceFor.call(grid, record, id, metadata),
   renderDistributorPrice: (record, metadata) => gridClass.renderDistributorPrice.call(grid, record, metadata),
   fitCatalogSelector: () => {}
 };
 assert.equal(grid.getLcscProductUrl(part), 'https://www.lcsc.com/product-detail/C25862.html');
+grid.catalogDistributors = {
+  each: (callback, scope) => distributors.forEach(distributor => callback.call(scope, distributor))
+};
 assert.equal(grid.getDistributorNumberInfo(part).number, 'C25862');
 const priceCell = {};
+assert.match(grid.renderDistributorPrice(part, priceCell), /LCSC: 0\.0127 USD \(50\+\)/);
+assert.match(grid.renderDistributorPrice(part, priceCell), /TME: 0\.02 EUR/);
+assert.match(grid.renderDistributorPrice(part, priceCell), /50\+: 0\.0127 USD<br>500\+: 0\.011 USD/);
+grid.selectedDistributorIds = ['/api/distributors/30'];
 assert.equal(grid.renderDistributorPrice(part, priceCell), '0.0127 USD (50+)');
 assert.match(priceCell.tdAttr, /500\+: 0\.011 USD/);
 gridClass.defineColumns.call(grid);
+const categoryColumn = grid.columns.find(item => item.dataIndex === 'category.categoryPath');
+assert.equal(categoryColumn.renderer('Root Category ➤ Złącza'), 'Złącza');
 grid.getDefaultColumnConfiguration = () => grid.columns;
 const presetColumns = gridClass.preparePresetColumns.call(grid, [
   {text: 'Avg. Price', dataIndex: 'averagePrice'},
@@ -88,17 +107,45 @@ grid.store = {each: callback => [part].forEach(callback)};
 grid.catalogDistributors = {
   loadData: data => { choices.splice(0, choices.length, ...data.map(item => ({get: key => item[key]}))); },
   findRecord: (field, value) => choices.find(item => item.get(field) === value),
-  each: callback => choices.forEach(callback),
+  each: (callback, scope) => choices.forEach(item => callback.call(scope, item)),
   getAt: index => choices[index]
 };
-grid.catalogDistributor = {setValue: value => { grid.selectedDistributorId = value; }};
-grid.readCatalogPreference = () => null;
+let menuItems = [];
+grid.catalogDistributorMenu = {
+  removeAll: () => { menuItems = []; },
+  add: item => {
+    if (typeof item === 'string') return item;
+    const component = {...item, setChecked: checked => { component.checked = checked; }};
+    menuItems.push(component);
+    return component;
+  }
+};
+grid.catalogDistributor = {setText: text => { grid.catalogLabel = text; }};
+grid.getView = () => ({refresh: () => {}});
+grid.fireEvent = () => {};
+grid.refreshCatalogDistributorMenu = () => gridClass.refreshCatalogDistributorMenu.call(grid);
+grid.syncCatalogDistributorMenu = () => gridClass.syncCatalogDistributorMenu.call(grid);
+grid.setSelectedCatalogDistributors = ids => gridClass.setSelectedCatalogDistributors.call(grid, ids);
+grid.selectedDistributorIds = null;
 gridClass.refreshCatalogDistributors.call(grid);
-assert.deepEqual(choices.map(item => item.get('name')), ['LCSC']);
+assert.deepEqual(choices.map(item => item.get('name')), ['LCSC', 'TME']);
+assert.match(grid.catalogLabel, /Auto/);
+assert.equal(menuItems[0].checked, true);
+assert.equal(menuItems[2].checked, true);
+assert.match(grid.renderDistributorNumber(part), /C25862/);
+assert.match(grid.renderDistributorNumber(part), /SMD0402-10K-1%/);
+assert.match(grid.renderDistributorPrice(part, {}), /LCSC: 0\.0127 USD/);
+assert.match(grid.renderDistributorPrice(part, {}), /TME: 0\.02 EUR/);
+menuItems[1].listeners.checkchange.call(grid, null, false);
+assert.deepEqual(Array.from(grid.selectedDistributorIds), ['/api/distributors/31']);
+assert.doesNotMatch(grid.renderDistributorNumber(part), /C25862/);
+assert.match(grid.renderDistributorNumber(part), /SMD0402-10K-1%/);
+menuItems[0].listeners.checkchange.call(grid, null, true);
+assert.equal(grid.selectedDistributorIds, null);
 grid.store = {each: callback => [missingCode].forEach(callback)};
 gridClass.refreshCatalogDistributors.call(grid);
 assert.equal(choices.length, 0);
-assert.equal(grid.selectedDistributorId, null);
+assert.equal(grid.selectedDistributorIds, null);
 grid.store = {each: callback => [part].forEach(callback)};
 gridClass.refreshCatalogDistributors.call(grid);
 

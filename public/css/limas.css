@@ -352,6 +352,15 @@ body.limas-theme-dark {
     background-color: var(--limas-box-warning-border) !important;
 }
 
+.limas-parts-grid .limas-row-zero-stock .x-grid-cell,
+.limas-parts-grid .limas-row-zero-stock .x-grid-cell-inner {
+    background-color: #fff5f5 !important;
+}
+body.limas-theme-dark .limas-parts-grid .limas-row-zero-stock .x-grid-cell,
+body.limas-theme-dark .limas-parts-grid .limas-row-zero-stock .x-grid-cell-inner {
+    background-color: #3a292c !important;
+}
+
 /* Keep selected parts obvious, including rows tinted for low stock. Text
  * remains selectable because only the row background changes. */
 .limas-parts-grid .x-grid-item-selected .x-grid-cell,
@@ -365,6 +374,18 @@ body.limas-theme-dark .limas-parts-grid .x-grid-item-selected .x-grid-cell-inner
 body.limas-theme-dark .limas-parts-grid .x-grid-row-selected .x-grid-cell,
 body.limas-theme-dark .limas-parts-grid .x-grid-row-selected .x-grid-cell-inner {
     background-color: #244c70 !important;
+}
+.limas-parts-grid .limas-row-zero-stock.x-grid-item-selected .x-grid-cell,
+.limas-parts-grid .limas-row-zero-stock.x-grid-item-selected .x-grid-cell-inner,
+.limas-parts-grid .limas-row-zero-stock.x-grid-row-selected .x-grid-cell,
+.limas-parts-grid .limas-row-zero-stock.x-grid-row-selected .x-grid-cell-inner {
+    background-color: #f2d4d8 !important;
+}
+body.limas-theme-dark .limas-parts-grid .limas-row-zero-stock.x-grid-item-selected .x-grid-cell,
+body.limas-theme-dark .limas-parts-grid .limas-row-zero-stock.x-grid-item-selected .x-grid-cell-inner,
+body.limas-theme-dark .limas-parts-grid .limas-row-zero-stock.x-grid-row-selected .x-grid-cell,
+body.limas-theme-dark .limas-parts-grid .limas-row-zero-stock.x-grid-row-selected .x-grid-cell-inner {
+    background-color: #704044 !important;
 }
 
 .limas-dropzone {

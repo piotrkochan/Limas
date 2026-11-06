@@ -53,7 +53,13 @@ Ext.define('Limas.PartsGrid', {
 		// PK #821: tint rows where stockLevel <= minStockLevel (lowStock is
 		// the backend's auto-computed boolean — already lives on Part)
 		getRowClass: function (record) {
-			return record.get('lowStock') ? 'limas-row-low-stock' : '';
+			let classes = [];
+			if (record.get('lowStock')) classes.push('limas-row-low-stock');
+			let stock = record.get('stockLevel');
+			if (stock !== null && stock !== undefined && stock !== '' && Number(stock) === 0) {
+				classes.push('limas-row-zero-stock');
+			}
+			return classes.join(' ');
 		}
 	},
 	enableDragDrop: true,
@@ -70,7 +76,12 @@ Ext.define('Limas.PartsGrid', {
 	initComponent: function () {
 		this.groupingFeature = Ext.create('Ext.grid.feature.Grouping', {
 			//enableGroupingMenu: false,
-			groupHeaderTpl: '{name} ({rows.length} ' + i18n('Part(s)') + ')'
+			groupHeaderTpl: [
+				'{[this.displayPath(values.name)]} ({rows.length} ' + i18n('Part(s)') + ')',
+				{displayPath: function (path) {
+					return Ext.htmlEncode(String(path || '').replace(/^Root Category(?:\s*➤\s*|$)/, ''));
+				}}
+			]
 		});
 
 		// Create the columns
@@ -220,25 +231,15 @@ Ext.define('Limas.PartsGrid', {
 		if (this.selectedDistributorField !== 'sku' && this.selectedDistributorField !== 'orderNumber') {
 			this.selectedDistributorField = 'sku';
 		}
-		this.selectedDistributorId = null;
+		this.selectedDistributorIds = null;
 		let distributorStore = Ext.data.StoreManager.lookup('DistributorStore');
 		this.catalogDistributors = Ext.create('Ext.data.Store', {
 			fields: ['@id', 'name'], data: []
 		});
-		this.catalogDistributor = Ext.create('Ext.form.field.ComboBox', {
-			fieldLabel: i18n('Distributor'), labelWidth: 75, width: 180,
-			store: this.catalogDistributors, displayField: 'name', valueField: '@id',
-			queryMode: 'local', forceSelection: true, editable: false,
-			listeners: {
-				change: function (field, value) {
-					this.selectedDistributorId = value;
-					let distributor = this.catalogDistributors.findRecord('@id', value, 0, false, true, true);
-					this.selectedDistributorName = distributor
-						? String(distributor.get('name')).toLowerCase().replace(/[^a-z0-9]/g, '') : '';
-					if (value) this.writeCatalogPreference('distributor', value);
-					this.getView().refresh();
-				}, scope: this
-			}
+		this.catalogDistributorMenu = Ext.create('Ext.menu.Menu');
+		this.catalogDistributor = Ext.create('Ext.button.Button', {
+			text: i18n('Distributor') + ': ' + i18n('Auto'),
+			menu: this.catalogDistributorMenu
 		});
 		this.catalogField = Ext.create('Ext.form.field.ComboBox', {
 			fieldLabel: i18n('Field'), labelWidth: 35, width: 110,
@@ -253,15 +254,13 @@ Ext.define('Limas.PartsGrid', {
 					this.selectedDistributorField = value;
 					this.writeCatalogPreference('field', value);
 					this.getView().refresh();
+					this.fireEvent('catalogselectionchange');
 				}, scope: this
 			}
 		});
 		let searchIndex = this.topToolbar.items.indexOf(this.searchField);
 		this.topToolbar.insert(searchIndex, this.catalogDistributor);
 		this.topToolbar.insert(searchIndex + 1, this.catalogField);
-		this.catalogDistributor.on('afterrender', function () {
-			this.fitCatalogSelector(this.catalogDistributor, this.catalogDistributors, 'name');
-		}, this);
 		this.catalogField.on('afterrender', function () {
 			this.fitCatalogSelector(this.catalogField, this.catalogField.getStore(), 'label');
 		}, this);
@@ -339,16 +338,64 @@ Ext.define('Limas.PartsGrid', {
 			if (used[id]) available.push({'@id': id, name: distributor.get('name')});
 		});
 		this.catalogDistributors.loadData(available);
-		this.fitCatalogSelector(this.catalogDistributor, this.catalogDistributors, 'name');
-		let preferred = this.readCatalogPreference('distributor', null);
-		let selected = this.catalogDistributors.findRecord('@id', this.selectedDistributorId, 0, false, true, true)
-			|| this.catalogDistributors.findRecord('@id', preferred, 0, false, true, true);
-		if (!selected) {
-			this.catalogDistributors.each(function (record) {
-				if (String(record.get('name')).toLowerCase() === 'lcsc') selected = record;
-			});
-		}
-		this.catalogDistributor.setValue((selected || this.catalogDistributors.getAt(0))?.get('@id') || null);
+		this.refreshCatalogDistributorMenu();
+		this.getView().refresh();
+	},
+	setSelectedCatalogDistributors: function (ids) {
+		this.selectedDistributorIds = ids === null ? null : ids.slice();
+		this.syncCatalogDistributorMenu();
+		this.getView().refresh();
+		this.fireEvent('catalogselectionchange');
+	},
+	refreshCatalogDistributorMenu: function () {
+		let available = [];
+		this.catalogDistributors.each(function (record) { available.push(record); });
+		this.catalogDistributorItems = [];
+		this.catalogDistributorMenu.removeAll();
+		this.catalogDistributorItems.push(this.catalogDistributorMenu.add({
+			xtype: 'menucheckitem', text: i18n('Auto / all available'),
+			hideOnClick: false,
+			listeners: {checkchange: function (item, checked) {
+				this.setSelectedCatalogDistributors(checked ? null : available.map(function (record) { return record.get('@id'); }));
+			}, scope: this}
+		}));
+		if (available.length) this.catalogDistributorMenu.add('-');
+		available.forEach(function (record) {
+			let id = record.get('@id');
+			this.catalogDistributorItems.push(this.catalogDistributorMenu.add({
+				xtype: 'menucheckitem', text: record.get('name'), distributorId: id,
+				hideOnClick: false,
+				listeners: {checkchange: function (item, checked) {
+					let current = this.selectedDistributorIds || available.map(function (entry) { return entry.get('@id'); });
+					let next = current.filter(function (value) { return value !== id; });
+					if (checked) next.push(id);
+					this.setSelectedCatalogDistributors(next);
+				}, scope: this}
+			}));
+		}, this);
+		this.syncCatalogDistributorMenu();
+	},
+	syncCatalogDistributorMenu: function () {
+		let automatic = this.selectedDistributorIds === null;
+		let selected = this.selectedDistributorIds || [];
+		(this.catalogDistributorItems || []).forEach(function (item, index) {
+			let checked = index === 0 ? automatic : automatic || selected.indexOf(item.distributorId) !== -1;
+			item.setChecked(checked, true);
+		});
+		let label = automatic ? i18n('Auto / all available')
+			: (selected.length === 0 ? i18n('None') : selected.length + ' ' + i18n('selected'));
+		this.catalogDistributor.setText(i18n('Distributor') + ': ' + label);
+	},
+	getSelectedCatalogEntries: function (record) {
+		let numbers = record.get('distributorNumbers') || {};
+		let entries = [];
+		this.catalogDistributors.each(function (distributor) {
+			let id = distributor.get('@id');
+			if (numbers[id] && (this.selectedDistributorIds === null || this.selectedDistributorIds.indexOf(id) !== -1)) {
+				entries.push({id: id, name: String(distributor.get('name'))});
+			}
+		}, this);
+		return entries;
 	},
 	fitCatalogSelector: function (combo, store, displayField) {
 		if (!combo.rendered) return;
@@ -389,11 +436,17 @@ Ext.define('Limas.PartsGrid', {
 			? 'https://www.lcsc.com/product-detail/' + String(code).toUpperCase() + '.html' : null;
 	},
 	getDistributorNumberInfo: function (record) {
+		let entries = this.getSelectedCatalogEntries(record);
+		if (!entries.length) return null;
+		let entry = entries[0];
+		return this.getDistributorNumberInfoFor(record, entry.id, entry.name.toLowerCase().replace(/[^a-z0-9]/g, ''));
+	},
+	getDistributorNumberInfoFor: function (record, distributorId, distributorName) {
 		let numbers = record.get('distributorNumbers') || {};
-		let identifiers = numbers[this.selectedDistributorId];
+		let identifiers = numbers[distributorId];
 		let number = identifiers && identifiers[this.selectedDistributorField];
 		if (!number) return null;
-		let source = this.selectedDistributorName || '';
+		let source = distributorName || '';
 		return {
 			number: String(number),
 			source: source,
@@ -401,8 +454,16 @@ Ext.define('Limas.PartsGrid', {
 		};
 	},
 	renderDistributorNumber: function (record) {
-		let info = this.getDistributorNumberInfo(record);
-		if (!info) return '';
+		let entries = this.getSelectedCatalogEntries(record);
+		return entries.map(function (entry) {
+			let source = entry.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+			let info = this.getDistributorNumberInfoFor(record, entry.id, source);
+			if (!info) return '';
+			let content = this.renderDistributorNumberInfo(info);
+			return entries.length > 1 ? '<div title="' + Ext.htmlEncode(entry.name) + '">' + content + '</div>' : content;
+		}, this).join('');
+	},
+	renderDistributorNumberInfo: function (info) {
 		let source = info.source;
 		let hasSprite = Ext.Array.contains(
 			['avnet', 'mouser', 'digikey', 'element14', 'farnell', 'lcsc', 'newark', 'oemsecrets', 'rs', 'tme'], source);
@@ -413,7 +474,17 @@ Ext.define('Limas.PartsGrid', {
 		return info.url ? '<a href="' + Ext.htmlEncode(info.url) + '" target="_blank" rel="noopener noreferrer">' + content + '</a>' : content;
 	},
 	renderDistributorPrice: function (record, metadata) {
-		let offer = (record.get('distributorNumbers') || {})[this.selectedDistributorId];
+		let entries = this.getSelectedCatalogEntries(record);
+		return entries.map(function (entry) {
+			let cellMetadata = entries.length === 1 ? metadata : {};
+			let price = this.renderDistributorPriceFor(record, entry.id, cellMetadata);
+			if (!price) return '';
+			return entries.length > 1
+				? '<div ' + (cellMetadata.tdAttr || '') + '>' + Ext.htmlEncode(entry.name) + ': ' + price + '</div>' : price;
+		}, this).filter(Boolean).join('');
+	},
+	renderDistributorPriceFor: function (record, distributorId, metadata) {
+		let offer = (record.get('distributorNumbers') || {})[distributorId];
 		if (!offer) return '';
 		let breaks = Ext.isArray(offer.priceBreaks) ? offer.priceBreaks : [];
 		if (!breaks.length && (offer.price === null || offer.price === undefined || offer.price === '')) return '';
@@ -423,9 +494,9 @@ Ext.define('Limas.PartsGrid', {
 		};
 		let currency = offer.currency || '';
 		if (breaks.length) {
-			metadata.tdAttr = 'data-qtip="' + Ext.htmlEncode(breaks.map(function (tier) {
-				return tier.quantity + '+: ' + exact(tier.price) + ' ' + currency;
-			}).join(' | ')) + '"';
+			metadata.tdAttr = 'data-qtip="' + breaks.map(function (tier) {
+				return Ext.htmlEncode(tier.quantity + '+: ' + exact(tier.price) + ' ' + currency);
+			}).join('<br>') + '"';
 		}
 		let suffix = breaks.length && Number(breaks[0].quantity) > 1 ? ' (' + breaks[0].quantity + '+)' : '';
 		return Ext.htmlEncode(exact(price) + ' ' + currency + suffix);
@@ -646,6 +717,9 @@ Ext.define('Limas.PartsGrid', {
 			}, {
 				header: i18n('Category'),
 				dataIndex: 'category.categoryPath',
+				renderer: function (value) {
+					return Ext.htmlEncode(String(value || '').replace(/^Root Category(?:\s*➤\s*|$)/, ''));
+				},
 				hidden: true
 			}, {
 				header: i18n('Create Date'),

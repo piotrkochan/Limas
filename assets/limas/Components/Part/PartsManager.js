@@ -108,6 +108,7 @@ Ext.define('Limas.PartManager', {
 		this.grid.on('duplicateItemWithAllData', this.onDuplicateItemWithAllData, this);
 		this.grid.on('itemcontextmenu', this.onPartContextMenu, this);
 		this.grid.searchField.on('beforesearch', this.onBeforePartSearch, this);
+		this.grid.on('catalogselectionchange', function () { Limas.getApplication().writeRoute(); }, this);
 		this.store.on('load', function () { Limas.getApplication().writeRoute(); }, this);
 		this.tree.on('syncCategory', this.onSyncCategory, this);
 		this.tree.on('partCategoryChanged', this.refreshCategoryCounts, this);
@@ -366,6 +367,16 @@ Ext.define('Limas.PartManager', {
 		if (category) query.set('category', category[1]);
 		let page = this.store.currentPage || 1;
 		if (page > 1) query.set('page', String(page));
+		let search = this.grid.searchField;
+		if (search.hasSearch && search.getValue()) query.set('search', search.getValue());
+		if (this.grid.selectedDistributorField === 'orderNumber') query.set('field', 'orderNumber');
+		if (this.grid.selectedDistributorIds !== null) {
+			let ids = this.grid.selectedDistributorIds.map(function (id) {
+				let match = String(id).match(/^\/api\/distributors\/(\d+)$/);
+				return match ? match[1] : null;
+			}).filter(Boolean);
+			query.set('distributors', ids.length ? ids.join(',') : 'none');
+		}
 		let selection = this.grid.getSelectionModel().getSelection();
 		let part = selection.length === 1 && String(selection[0].get('@id') || '').match(/^\/api\/parts\/(\d+)$/);
 		if (part) query.set('part', part[1]);
@@ -381,7 +392,13 @@ Ext.define('Limas.PartManager', {
 			project: integer('project') ? '/api/projects/' + integer('project') : '',
 			category: integer('category'),
 			part: integer('part'),
-			page: Math.min(Number(integer('page') || 1), 100000)
+			page: Math.min(Number(integer('page') || 1), 100000),
+			search: (query.get('search') || '').slice(0, 500),
+			field: query.get('field') === 'orderNumber' ? 'orderNumber' : 'sku',
+			distributors: query.has('distributors')
+				? (query.get('distributors') === 'none' ? [] : (query.get('distributors') || '').split(',')
+					.filter(function (id) { return /^[1-9]\d*$/.test(id); })
+					.map(function (id) { return '/api/distributors/' + id; })) : null
 		};
 		this.routePending = true;
 		this.applyPendingRoute();
@@ -394,6 +411,15 @@ Ext.define('Limas.PartManager', {
 		let project = route.project && this.projectChoices.findRecord('id', route.project, 0, false, true, true)
 			? route.project : '';
 		this.projectSelector.setValue(project || this.allPartsValue);
+		this.grid.catalogField.setValue(route.field);
+		this.grid.setSelectedCatalogDistributors(route.distributors);
+		let search = this.grid.searchField;
+		if (route.search && (!search.hasSearch || search.getValue() !== route.search)) {
+			search.setValue(route.search);
+			search.startSearch();
+		} else if (!route.search && search.hasSearch) {
+			search.resetSearch();
+		}
 		let node = route.category
 			? this.tree.getRootNode().findChild('@id', '/api/part_categories/' + route.category, true) : null;
 		if (node) {
