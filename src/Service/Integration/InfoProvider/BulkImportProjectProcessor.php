@@ -6,6 +6,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use Limas\Entity\BulkImportJob;
 use Limas\Entity\BulkImportJobItem;
 use Limas\Entity\ProjectPart;
+use Limas\Entity\StockEntry;
 use Limas\Service\Integration\InfoProvider\Enum\BulkImportItemStatus;
 use Limas\Service\Integration\InfoProvider\Enum\BulkImportJobStatus;
 
@@ -51,21 +52,34 @@ final readonly class BulkImportProjectProcessor
 	private function processItem(BulkImportJob $job, BulkImportJobItem $item): void
 	{
 		$id = $item->getRawLcsc();
-		$qty = filter_var($item->getRawQuantity(), FILTER_VALIDATE_INT);
+		$usesQuantity = $job->usesProjectBomQuantity() || $job->usesProjectStockQuantity();
+		$qty = $usesQuantity ? filter_var($item->getRawQuantity(), FILTER_VALIDATE_INT) : 1;
 		if ($id === null || $qty === false || $qty < 1) {
-			throw new \InvalidArgumentException('Project row needs valid LCSC ID and positive integer Quantity');
+			throw new \InvalidArgumentException('Project row needs valid LCSC ID and, when quantity is selected, a positive integer Quantity');
 		}
 		[$part, $created] = $this->resolver->resolve($id, $job->getDefaultCategory(), $job->getDefaultStorage());
 		$item->setPart($created ? $part : null)->setExistingPart($created ? null : $part);
 		$project = $job->getProject();
 		$matches = $this->em->getRepository(ProjectPart::class)->findBy(['project' => $project, 'part' => $part]);
 		if (count($matches) > 1) throw new \RuntimeException('Project has multiple rows for Part #' . $part->getId());
+		if ($job->usesProjectStockQuantity()) {
+			$entry = (new StockEntry)->setStockLevel($qty)->setComment('Bulk import project: add stock');
+			if ($job->getCreatedBy() !== null) $entry->setUser($job->getCreatedBy());
+			$part->addStockLevel($entry);
+			$item->setQuantityApplied($qty);
+		}
 		if ($matches !== []) {
+			if (!$job->usesProjectBomQuantity()) {
+				$item->setStatus($job->usesProjectStockQuantity() ? BulkImportItemStatus::Success : BulkImportItemStatus::Skipped)
+					->setErrorMessage('Already in project; BOM quantity unchanged.');
+				return;
+			}
 			$item->setStatus(BulkImportItemStatus::Conflict)
-				->setErrorMessage('Already in project with quantity ' . $matches[0]->getQuantity() . '. Choose keep, replace or add.');
+				->setErrorMessage('Already in project with BOM quantity ' . $matches[0]->getQuantity() . '. Choose keep, replace or add.'
+					. ($job->usesProjectStockQuantity() ? ' Stock quantity was already added.' : ''));
 			return;
 		}
-		$row = (new ProjectPart)->setPart($part)->setQuantity($qty)->setRemarks($this->remarks($item));
+		$row = (new ProjectPart)->setPart($part)->setQuantity($job->usesProjectBomQuantity() ? $qty : 1)->setRemarks($this->remarks($item));
 		$project->addPart($row);
 		$this->em->persist($row);
 		$item->setStatus(BulkImportItemStatus::Success);
@@ -100,7 +114,8 @@ final readonly class BulkImportProjectProcessor
 				$row->setRemarks(implode(' | ', array_filter([$row->getRemarks(), $this->remarks($item)])));
 			}
 			$item->setProjectDecision($choice)
-				->setStatus($choice === 'keep' ? BulkImportItemStatus::Skipped : BulkImportItemStatus::Success)
+				->setStatus($choice === 'keep' && !$job->usesProjectStockQuantity()
+					? BulkImportItemStatus::Skipped : BulkImportItemStatus::Success)
 				->setErrorMessage('Project conflict: ' . $choice);
 		}
 		$this->refreshStatus($job);

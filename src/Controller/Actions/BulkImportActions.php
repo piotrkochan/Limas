@@ -76,8 +76,16 @@ class BulkImportActions
 			return new JsonResponse(['error' => 'Project not found'], 404);
 		}
 		$projectMode = $projectId > 0 || $projectName !== '';
-		if ($projectMode && (!isset($mapping['lcsc']) || !isset($mapping['quantity']))) {
-			return new JsonResponse(['error' => 'Project import requires LCSC and Quantity columns'], 400);
+		$projectBomQuantity = $meta['projectBomQuantity'] ?? true;
+		$projectStockQuantity = $meta['projectStockQuantity'] ?? false;
+		if (!is_bool($projectBomQuantity) || !is_bool($projectStockQuantity)) {
+			return new JsonResponse(['error' => 'Project quantity options must be booleans'], 400);
+		}
+		if ($projectMode && !isset($mapping['lcsc'])) {
+			return new JsonResponse(['error' => 'Project import requires an LCSC column'], 400);
+		}
+		if ($projectMode && ($projectBomQuantity || $projectStockQuantity) && !isset($mapping['quantity'])) {
+			return new JsonResponse(['error' => 'Selected project quantity options require a Quantity column'], 400);
 		}
 		if ($projectMode && ($meta['duplicatesBehavior'] ?? 'skip') === 'update_stock') {
 			return new JsonResponse(['error' => 'Project import cannot update stock'], 400);
@@ -116,9 +124,7 @@ class BulkImportActions
 		$mfrCol = isset($mapping['manufacturer']) && is_int($mapping['manufacturer']) ? $mapping['manufacturer'] : null;
 		$catCol = isset($mapping['category']) && is_int($mapping['category']) ? $mapping['category'] : null;
 		$stoCol = isset($mapping['storage']) && is_int($mapping['storage']) ? $mapping['storage'] : null;
-		// Quantity column is only meaningful in UpdateStock mode; we still
-		// persist whatever the user mapped so a mid-job re-run with a
-		// different duplicatesBehavior reads the same column.
+		// The same CSV column can supply BOM quantity, stock quantity, or both.
 		$qtyCol = isset($mapping['quantity']) && is_int($mapping['quantity']) ? $mapping['quantity'] : null;
 
 		$job = new BulkImportJob;
@@ -127,6 +133,8 @@ class BulkImportActions
 			$this->em->persist($project);
 		}
 		$job->setProject($project);
+		$job->setProjectBomQuantity($projectMode && $projectBomQuantity);
+		$job->setProjectStockQuantity($projectMode && $projectStockQuantity);
 		$job->setDefaultCategory($category);
 		$job->setDefaultStorage($storage);
 		$dupRaw = $meta['duplicatesBehavior'] ?? 'skip';
@@ -163,7 +171,9 @@ class BulkImportActions
 				$prior = $byLcsc[$lcsc];
 				$a = filter_var($prior->getRawQuantity(), FILTER_VALIDATE_INT);
 				$b = filter_var($item->getRawQuantity(), FILTER_VALIDATE_INT);
-				$prior->setRawQuantity($a !== false && $b !== false && $a > 0 && $b > 0 ? (string)($a + $b) : 'invalid');
+				if ($projectBomQuantity || $projectStockQuantity) {
+					$prior->setRawQuantity($a !== false && $b !== false && $a > 0 && $b > 0 ? (string)($a + $b) : 'invalid');
+				}
 				$prior->setRawDesignators(implode(', ', array_filter([$prior->getRawDesignators(), $item->getRawDesignators()])));
 				$prior->setRawComment(implode(' | ', array_unique(array_filter([$prior->getRawComment(), $item->getRawComment()]))));
 				continue;
@@ -234,6 +244,8 @@ class BulkImportActions
 			'defaultStorage' => $job->getDefaultStorage()->getName(),
 			'projectId' => $job->getProject()?->getId(),
 			'projectName' => $job->getProject()?->getName(),
+			'projectBomQuantity' => $job->usesProjectBomQuantity(),
+			'projectStockQuantity' => $job->usesProjectStockQuantity(),
 			'items' => $items
 		]);
 	}

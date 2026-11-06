@@ -138,17 +138,18 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 		this.catColumn = this.buildColumnCombo('Category', false);
 		this.stoColumn = this.buildColumnCombo('Storage', false);
 		this.qtyColumn = this.buildColumnCombo('Quantity', false);
+		this.qtyColumn.setFieldLabel(i18n('Stock quantity (Update stock only)'));
 		this.projectModeCombo = Ext.create('Ext.form.field.ComboBox', {
-			fieldLabel: i18n('Destination'), labelWidth: 140, editable: false,
+			fieldLabel: i18n('Project'), labelWidth: 140, editable: false,
 			value: 'inventory', queryMode: 'local', displayField: 'label', valueField: 'value',
 			store: {fields: ['value', 'label'], data: [
-				{value: 'inventory', label: i18n('Inventory only')},
+				{value: 'inventory', label: i18n('No project')},
 				{value: 'existing', label: i18n('Existing project')},
 				{value: 'new', label: i18n('New project')}
 			]}, listeners: {change: () => me.refreshSubmitButton()}
 		});
 		this.projectCombo = Ext.create('Ext.form.field.ComboBox', {
-			fieldLabel: i18n('Project'), labelWidth: 140, queryMode: 'local',
+			fieldLabel: i18n('Existing project'), labelWidth: 140, queryMode: 'local',
 			displayField: 'name', valueField: 'id', forceSelection: true,
 			store: {fields: ['id', 'name'], data: []},
 			listeners: {change: () => me.refreshSubmitButton()}
@@ -156,6 +157,22 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 		this.projectNameField = Ext.create('Ext.form.field.Text', {
 			fieldLabel: i18n('New project name'), labelWidth: 140,
 			listeners: {change: () => me.refreshSubmitButton()}
+		});
+		this.bomQuantityCheckbox = Ext.create('Ext.form.field.Checkbox', {
+			boxLabel: i18n('Use CSV quantity for project BOM'),
+			checked: true,
+			listeners: {change: () => me.refreshSubmitButton()}
+		});
+		this.stockQuantityCheckbox = Ext.create('Ext.form.field.Checkbox', {
+			boxLabel: i18n('Add CSV quantity to inventory stock'),
+			checked: false,
+			listeners: {change: () => me.refreshSubmitButton()}
+		});
+		this.projectQuantityOptions = Ext.create('Ext.container.Container', {
+			hidden: true,
+			layout: 'vbox',
+			items: [this.bomQuantityCheckbox, this.stockQuantityCheckbox,
+				{xtype: 'component', html: '<small>' + i18n('If BOM quantity is off, a new project item starts at 1; existing BOM quantity stays unchanged.') + '</small>'}]
 		});
 
 		// Duplicates strategy — what to do when an inbound row's
@@ -260,6 +277,13 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 									items: [this.defaultCategoryCombo, this.defaultStorageCombo]
 								},
 								{
+									xtype: 'fieldset',
+									title: i18n('Project (optional)'),
+									layout: 'vbox',
+									defaults: {anchor: '100%'},
+									items: [this.projectModeCombo, this.projectCombo, this.projectNameField, this.projectQuantityOptions]
+								},
+								{
 									// Job-level decision — not a default for
 									// fallback rows but the strategy applied
 									// to every existing-Part match.
@@ -267,7 +291,7 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 									title: i18n('Duplicates strategy'),
 									layout: 'vbox',
 									defaults: {anchor: '100%'},
-									items: [this.duplicatesCombo, this.projectModeCombo, this.projectCombo, this.projectNameField]
+									items: [this.duplicatesCombo]
 								}
 							]
 						}
@@ -482,24 +506,23 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 	},
 
 	refreshSubmitButton: function () {
-		// All four conditions must hold: file dropped, MPN column picked,
-		// AND both defaults set. The defaults are required by the worker
-		// (it falls back to them when a row doesn't resolve), so we'd
-		// rather gate the submit than let the operator post a job that
-		// gets rejected at the controller.
 		let mode = this.projectModeCombo.getValue();
+		let projectMode = mode !== 'inventory';
+		let needsProjectQuantity = projectMode && (this.bomQuantityCheckbox.getValue() || this.stockQuantityCheckbox.getValue());
 		let projectReady = mode === 'inventory'
 			|| (mode === 'existing' && !!this.projectCombo.getValue())
 			|| (mode === 'new' && !!String(this.projectNameField.getValue() || '').trim());
 		let ok = this.parsedFile !== null
 			&& (this.mpnColumn.getValue() !== null || this.lcscColumn.getValue() !== null)
-			&& (mode === 'inventory' || (this.lcscColumn.getValue() !== null && this.qtyColumn.getValue() !== null))
+			&& (!projectMode || (this.lcscColumn.getValue() !== null && (!needsProjectQuantity || this.qtyColumn.getValue() !== null)))
 			&& projectReady
 			&& this.extractIri(this.defaultCategoryCombo.getValue()) !== null
 			&& this.extractIri(this.defaultStorageCombo.getValue()) !== null;
 		this.submitButton.setDisabled(!ok);
+		this.qtyColumn.setFieldLabel(projectMode ? i18n('CSV quantity') : i18n('Stock quantity (Update stock only)'));
 		this.projectCombo.setVisible(mode === 'existing');
 		this.projectNameField.setVisible(mode === 'new');
+		this.projectQuantityOptions.setVisible(projectMode);
 		this.duplicatesCombo.setDisabled(mode !== 'inventory');
 	},
 
@@ -582,11 +605,13 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 			,conflict: '? ' + i18n('Decision needed')
 		};
 		let html = '<table class="limas-grid-table" style="width:100%;">';
+		let projectMode = this.projectModeCombo.getValue() !== 'inventory';
 		html += '<tr>'
 			+ '<th style="width:40px;">#</th>'
 			+ '<th>' + i18n('MPN / LCSC') + '</th>'
 			+ '<th>' + i18n('Manufacturer') + '</th>'
-			+ '<th style="width:60px;">' + i18n('Qty') + '</th>'
+			+ (projectMode ? '<th style="width:60px;">' + i18n('BOM qty') + '</th>' : '')
+			+ '<th style="width:60px;">' + i18n('Stock qty') + '</th>'
 			+ '<th style="width:110px;">' + i18n('Status') + '</th>'
 			+ '<th>' + i18n('Result') + '</th>'
 			+ '</tr>';
@@ -615,19 +640,19 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 			let qtyCell = '';
 			if (r.quantityApplied !== null && r.quantityApplied !== undefined) {
 				qtyCell = '<span class="limas-text-success">+' + r.quantityApplied + '</span>';
-			} else if (r.rawQuantity) {
-				// Show the raw cell when no quantity was applied (eg. Skip mode keeps it in the row but doesn't touch stock)
-				qtyCell = '<span class="limas-text-muted">' + Ext.htmlEncode(r.rawQuantity) + '</span>';
 			}
+			let bomCell = projectMode && this.bomQuantityCheckbox.getValue() && r.rawQuantity
+				? Ext.htmlEncode(r.rawQuantity) : '—';
 			html += '<tr>'
 				+ '<td class="limas-text-muted">' + (r.line || '') + '</td>'
 			+ '<td>' + Ext.htmlEncode(r.lcsc || r.mpn || '') + '</td>'
 				+ '<td>' + Ext.htmlEncode(r.manufacturer || '') + '</td>'
-				+ '<td style="text-align:right;">' + qtyCell + '</td>'
+				+ (projectMode ? '<td style="text-align:right;">' + bomCell + '</td>' : '')
+				+ '<td style="text-align:right;">' + (qtyCell || '—') + '</td>'
 				+ '<td>' + pill + '</td>'
 				+ '<td>' + (lines.join('<br>') || '—') + '</td>'
 				+ '</tr>';
-		});
+		}, this);
 		html += '</table>';
 		return html;
 	},
@@ -654,6 +679,10 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 		if (this.footprintColumn.getValue() !== null) meta.mapping.footprint = this.footprintColumn.getValue();
 		if (mode === 'existing') meta.projectId = this.projectCombo.getValue();
 		if (mode === 'new') meta.projectName = String(this.projectNameField.getValue()).trim();
+		if (mode !== 'inventory') {
+			meta.projectBomQuantity = this.bomQuantityCheckbox.getValue();
+			meta.projectStockQuantity = this.stockQuantityCheckbox.getValue();
+		}
 		if (this.mfrColumn.getValue() !== null) meta.mapping.manufacturer = this.mfrColumn.getValue();
 		if (this.catColumn.getValue() !== null) meta.mapping.category = this.catColumn.getValue();
 		if (this.stoColumn.getValue() !== null) meta.mapping.storage = this.stoColumn.getValue();

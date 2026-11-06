@@ -62,6 +62,10 @@ class BulkImportJob
 	#[ORM\ManyToOne(targetEntity: Project::class)]
 	#[ORM\JoinColumn(name: 'project_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')]
 	private ?Project $project = null;
+	#[ORM\Column(type: Types::BOOLEAN, options: ['default' => true])]
+	private bool $projectBomQuantity = true;
+	#[ORM\Column(type: Types::BOOLEAN, options: ['default' => false])]
+	private bool $projectStockQuantity = false;
 	/** @var Collection<int, BulkImportJobItem> */
 	#[ORM\OneToMany(targetEntity: BulkImportJobItem::class, mappedBy: 'job', cascade: ['persist', 'remove'], orphanRemoval: true)]
 	#[Groups(['default'])]
@@ -164,6 +168,28 @@ class BulkImportJob
 	public function setProject(?Project $project): self
 	{
 		$this->project = $project;
+		return $this;
+	}
+
+	public function usesProjectBomQuantity(): bool
+	{
+		return $this->projectBomQuantity;
+	}
+
+	public function setProjectBomQuantity(bool $enabled): self
+	{
+		$this->projectBomQuantity = $enabled;
+		return $this;
+	}
+
+	public function usesProjectStockQuantity(): bool
+	{
+		return $this->projectStockQuantity;
+	}
+
+	public function setProjectStockQuantity(bool $enabled): self
+	{
+		$this->projectStockQuantity = $enabled;
 		return $this;
 	}
 
