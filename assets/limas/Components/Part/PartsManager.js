@@ -536,6 +536,10 @@ Ext.define('Limas.PartManager', {
 			text: i18n('Open in LCSC'), iconCls: 'distributor-icon lcsc',
 			disabled: multiple || !lcscUrl,
 			handler: function () { window.open(lcscUrl, '_blank', 'noopener,noreferrer'); }
+		}, {
+			text: multiple ? i18n('Delete selected parts') : i18n('Delete part'),
+			iconCls: 'web-icon brick_delete',
+			handler: Ext.bind(function () { this.confirmDeleteParts(records); }, this)
 		}, '-', {text: i18n('Projects'), disabled: true}];
 		if (multiple) menuItems.unshift({text: records.length + ' ' + i18n('parts selected'), disabled: true}, '-');
 		Ext.Array.each(this.projects || [], function (project) {
@@ -558,6 +562,35 @@ Ext.define('Limas.PartManager', {
 		// Destroying it synchronously here cancels Edit and stock actions.
 		menu.on('hide', function () { Ext.defer(menu.destroy, 1, menu); });
 		menu.showAt(position);
+	},
+	confirmDeleteParts: function (records) {
+		let selected = records.slice();
+		let message = selected.length === 1
+			? i18n('Delete part') + ' "' + Ext.htmlEncode(selected[0].get('name') || '') + '"?'
+			: i18n('Delete') + ' ' + selected.length + ' ' + i18n('selected parts') + '?';
+		Ext.Msg.confirm(i18n('Delete parts'), message, function (answer) {
+			if (answer === 'yes') this.eraseParts(selected);
+		}, this);
+	},
+	eraseParts: function (records) {
+		let pending = records.slice();
+		let failed = [];
+		this.detailPanel.collapse();
+		this.detail.clear();
+		let next = Ext.bind(function () {
+			let record = pending.shift();
+			if (!record) {
+				this.store.reload();
+				this.refreshCategoryCounts();
+				if (failed.length) Ext.Msg.alert(i18n('Delete parts'), failed.length + ' ' + i18n('part(s) could not be deleted.'));
+				return;
+			}
+			record.erase({success: next, failure: function () {
+				failed.push(record.get('name'));
+				next();
+			}});
+		}, this);
+		next();
 	},
 	changeProjectMembershipBulk: function (records, projectId, item, checked) {
 		item.setDisabled(true);

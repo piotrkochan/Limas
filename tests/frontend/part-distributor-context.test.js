@@ -199,6 +199,7 @@ const manager = {
   projects: [],
   showPartContextMenu: (...args) => managerClass.showPartContextMenu.call(manager, ...args),
   onEditPart: () => actions.push('edit'),
+  confirmDeleteParts: records => actions.push(['delete', records.length]),
   changeStockFromMenu: (_record, add) => actions.push(add ? 'add' : 'remove')
 };
 for (const [index, action] of [[0, 'edit'], [1, 'add'], [2, 'remove']]) {
@@ -239,6 +240,9 @@ assert.equal(menu.items[3].disabled, true);
 assert.equal(menu.items[4].disabled, true);
 assert.equal(menu.items[7].disabled, true);
 assert.match(menu.items.at(-1).text, /Project X \(some\)/);
+assert.equal(menu.items[8].text, 'Delete selected parts');
+menu.items[8].handler();
+assert.deepEqual(actions.at(-1), ['delete', 2]);
 menu.items[5].handler();
 menu.items[6].handler();
 assert.deepEqual(bulk, [
@@ -248,5 +252,29 @@ assert.deepEqual(bulk, [
 managerClass.onPartContextMenu.call(manager, null, part, null, 0, {stopEvent() {}, getXY: () => [10, 20]});
 assert.equal(selectCalls, 1);
 assert.equal(menu.items[0].text, 'Edit');
+
+let reloaded = 0;
+let refreshed = 0;
+let prompt;
+const erased = [];
+Ext.Msg = {
+  confirm: (_title, message, callback, scope) => { prompt = message; callback.call(scope, 'yes'); },
+  alert: () => { throw new Error('Unexpected delete failure'); }
+};
+const deleteContext = {
+  detailPanel: {collapse() {}}, detail: {clear() {}},
+  store: {reload: () => { reloaded++; }},
+  refreshCategoryCounts: () => { refreshed++; },
+  eraseParts(records) { managerClass.eraseParts.call(this, records); }
+};
+const deletable = [1, 2].map(id => ({
+  get: () => `Part ${id}`,
+  erase: options => { erased.push(id); options.success(); }
+}));
+managerClass.confirmDeleteParts.call(deleteContext, deletable);
+assert.equal(prompt, 'Delete 2 selected parts?');
+assert.deepEqual(erased, [1, 2]);
+assert.equal(reloaded, 1);
+assert.equal(refreshed, 1);
 
 console.log('Part distributor column, LCSC link, and context actions passed');
