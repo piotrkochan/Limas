@@ -31,6 +31,7 @@ const Ext = {
       const grid = {...config, getSelectionModel: () => selection};
       grid.setTitle = value => { grid.title = value; };
       grid.setHidden = value => { grid.hidden = value; };
+      grid.setHeight = value => { grid.height = value; };
       return grid;
     }
     if (name === 'Ext.button.Button') return {...config, setDisabled: value => { config.disabled = value; }};
@@ -57,6 +58,7 @@ const dialog = Object.assign({}, dialogClass, {
 });
 dialog.initComponent();
 assert.equal(dialog.previewGrid.selModel.selType, 'checkboxmodel');
+assert.equal(dialog.previewGrid.bufferedRenderer, false);
 dialog.loadPreview();
 assert.equal(request.url, '/api/parts/distributor-data/preview');
 assert.deepEqual(Array.from(request.jsonData.parts), ['/api/parts/226']);
@@ -66,6 +68,8 @@ request.success.call(dialog, {responseText: JSON.stringify({rows: [
 ], unchanged: [{partName: 'SR6863D', label: 'Catalog package', current: 'SOT-23'}]})});
 assert.equal(selected.length, 1);
 assert.equal(dialog.unchangedGrid.hidden, false);
+assert.equal(dialog.unchangedGrid.height, 92);
+assert.equal(dialog.unchangedGrid.bufferedRenderer, false);
 assert.equal(dialog.unchangedStore.getRange().length, 1);
 assert.equal(dialog.unchangedGrid.disableSelection, true);
 dialog.applyChanges();

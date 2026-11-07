@@ -19,6 +19,7 @@ Ext.define('Limas.Components.Part.DistributorDataRefreshDialog', {
 		});
 		this.previewGrid = Ext.create('Ext.grid.Panel', {
 			region: 'center',
+			bufferedRenderer: false,
 			store: this.previewStore,
 			selModel: {selType: 'checkboxmodel', mode: 'MULTI', showHeaderCheckbox: true},
 			viewConfig: {enableTextSelection: true, deferEmptyText: false,
@@ -36,7 +37,8 @@ Ext.define('Limas.Components.Part.DistributorDataRefreshDialog', {
 			]
 		});
 		this.unchangedGrid = Ext.create('Ext.grid.Panel', {
-			region: 'south', height: 175, split: true, hidden: true,
+			region: 'south', height: 90, hidden: true,
+			bufferedRenderer: false,
 			title: i18n('Already up to date'), store: this.unchangedStore,
 			disableSelection: true,
 			viewConfig: {enableTextSelection: true},
@@ -86,6 +88,7 @@ Ext.define('Limas.Components.Part.DistributorDataRefreshDialog', {
 				let unchanged = result.unchanged || [];
 				this.unchangedStore.loadData(unchanged);
 				this.unchangedGrid.setTitle(i18n('Already up to date') + ' (' + unchanged.length + ')');
+				this.unchangedGrid.setHeight(Math.min(220, 64 + unchanged.length * 28));
 				this.unchangedGrid.setHidden(unchanged.length === 0);
 				let defaults = this.previewStore.getRange().filter(function (row) { return !!row.get('defaultSelected'); });
 				this.previewGrid.getSelectionModel().select(defaults);
