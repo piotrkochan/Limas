@@ -226,15 +226,26 @@ Ext.application({
 		if (this.routeRestoring || (this.partManager && this.partManager.routePending)) return;
 		let route = this.buildRoute();
 		if (route && window.location.hash !== route) {
+			this.writtenRoutes = this.writtenRoutes || [];
+			this.writtenRoutes.push(route);
 			this.lastWrittenRoute = route;
 			window.location.hash = route;
 		}
 	},
-	onRouteHashChange: function () {
-		if (window.location.hash === this.lastWrittenRoute) {
-			this.lastWrittenRoute = null;
+	onRouteHashChange: function (event) {
+		// Several selection changes can write hashes before their events run.
+		// Match each event's own target instead of the already-updated location.
+		let eventHash = event && typeof event.newURL === 'string'
+			? ((event.newURL.match(/#.*$/) || [])[0] || '') : window.location.hash;
+		let written = this.writtenRoutes || [];
+		let ownIndex = written.indexOf(eventHash);
+		if (ownIndex !== -1) {
+			written.splice(0, ownIndex + 1);
+			this.lastWrittenRoute = written.length ? written[written.length - 1] : null;
 			return;
 		}
+		this.writtenRoutes = [];
+		this.lastWrittenRoute = null;
 		this.restoreRoute();
 	},
 	restoreRoute: function () {

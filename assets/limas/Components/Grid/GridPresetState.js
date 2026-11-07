@@ -61,11 +61,18 @@ Ext.define('Limas.Components.Grid.GridPresetState', {
 		let filters = grid.store.getFilters().items || [];
 		let out = [];
 		filters.forEach(function (f) {
-			if (typeof f.getState === 'function') {
+			if (!this.isContextFilter(f) && typeof f.getState === 'function') {
 				out.push(f.getState());
 			}
-		});
+		}, this);
 		return out;
+	},
+
+	isContextFilter: function (filter) {
+		let id = typeof filter.getId === 'function' ? filter.getId() : filter.id;
+		let property = typeof filter.getProperty === 'function' ? filter.getProperty() : filter.property;
+		return id === 'projectContextFilter' || id === 'categoryFilter'
+			|| property === 'projectParts.project';
 	},
 
 	/**
@@ -83,12 +90,14 @@ Ext.define('Limas.Components.Grid.GridPresetState', {
 		columns = columns || [];
 		if (typeof grid.preparePresetColumns === 'function') columns = grid.preparePresetColumns(columns);
 		columns = columns.map(this.materializeColumn, this);
+		let contextFilters = grid.store && grid.store.getFilters
+			? (grid.store.getFilters().items || []).filter(this.isContextFilter, this) : [];
 		grid.reconfigure(grid.store, columns);
 		if (grid.store && grid.store.getFilters) {
-			let liveFilters = filters.map(function (state) {
+			let liveFilters = filters.filter(function (state) { return !this.isContextFilter(state); }, this).map(function (state) {
 				return Ext.create('Limas.util.Filter', state);
 			});
-			grid.store.setFilters(liveFilters);
+			grid.store.setFilters(contextFilters.concat(liveFilters));
 		}
 	},
 
@@ -139,9 +148,11 @@ Ext.define('Limas.Components.Grid.GridPresetState', {
 	},
 
 	applyDefault: function (grid) {
+		let contextFilters = grid.store && grid.store.getFilters
+			? (grid.store.getFilters().items || []).filter(this.isContextFilter, this) : [];
 		grid.reconfigure(grid.store, grid.getDefaultColumnConfiguration());
 		if (grid.store && grid.store.getFilters) {
-			grid.store.setFilters([]);
+			grid.store.setFilters(contextFilters);
 		}
 	}
 });

@@ -49,9 +49,18 @@ assert.equal(categoryTree.folderColorFilter('red'), '');
 const manager = classes['Limas.PartManager'];
 const changes = [];
 const filters = {
+  items: [],
   beginUpdate: () => changes.push('begin'),
-  add: filter => changes.push(['add', filter]),
-  remove: filter => changes.push(['remove', filter]),
+  add(filter) {
+    filter.getProperty = () => filter.property;
+    filter.getValue = () => filter.value;
+    this.items.push(filter);
+    changes.push(['add', filter]);
+  },
+  remove(filter) {
+    this.items.splice(this.items.indexOf(filter), 1);
+    changes.push(['remove', filter]);
+  },
   endUpdate: () => changes.push('end')
 };
 Ext.create = (_name, config) => config;
@@ -73,6 +82,13 @@ assert.equal(changes.filter(change => Array.isArray(change) && change[0] === 're
 manager.onProjectContextChange.call(context, null, 'extModel442-2');
 assert.equal(context.activeProject, '');
 assert.equal(changes.filter(change => Array.isArray(change) && change[0] === 'add').length, 1);
+context.activeProject = '/api/projects/5';
+filters.items = []; // A legacy preset cleared the context filter while the selector stayed on project 5.
+manager.onProjectContextChange.call(context, null, '/api/projects/5');
+assert.equal(filters.items.length, 1);
+assert.equal(filters.items[0].value, '/api/projects/5');
+manager.onProjectContextChange.call(context, null, '/api/projects/5');
+assert.equal(filters.items.length, 1);
 
 let projectOptions;
 let selectedProjectValue;
@@ -171,6 +187,7 @@ const restoreContext = {
     getSelectionModel: () => ({select: record => { selectedPart = record; }})
   },
   onCategoryClick: () => {},
+  onProjectContextChange: () => {},
   applyPendingRoute() { manager.applyPendingRoute.call(this); }
 };
 manager.applyRouteQuery.call(restoreContext, new URLSearchParams('project=78&category=123&page=2&part=456&preset=42&search=SR6863D&field=orderNumber&distributors=30,31'));

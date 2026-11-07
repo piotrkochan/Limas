@@ -49,4 +49,21 @@ window.location.hash = '#/parts';
 app.writeRoute();
 assert.equal(window.location.hash, '#/parts');
 
+parts.routePending = false;
+let query = '?project=5&category=1&preset=1&part=12';
+parts.getRouteQuery = () => query;
+app.writeRoute();
+const firstHash = window.location.hash;
+query = '?project=5&category=1&preset=1';
+app.writeRoute();
+const secondHash = window.location.hash;
+let restores = 0;
+app.restoreRoute = () => { restores++; };
+app.onRouteHashChange({newURL: 'https://example.test/' + firstHash});
+app.onRouteHashChange({newURL: 'https://example.test/' + secondHash});
+assert.equal(restores, 0);
+assert.equal(app.lastWrittenRoute, null);
+app.onRouteHashChange({newURL: 'https://example.test/#/parts?project=7'});
+assert.equal(restores, 1);
+
 console.log('URL routing and browser history passed');

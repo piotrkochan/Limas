@@ -329,13 +329,19 @@ Ext.define('Limas.PartManager', {
 		// Only a real project IRI may become a server-side filter.
 		let project = typeof projectIri === 'string' && /^\/api\/projects\/[1-9]\d*$/.test(projectIri)
 			? projectIri : '';
-		if (!this.projectsLoaded || this.activeProject === project) return;
+		if (!this.projectsLoaded) return;
+		let filters = this.store.getFilters();
+		let currentFilters = (filters.items || []).filter(function (filter) {
+			return filter.getProperty() === 'projectParts.project';
+		});
+		if (this.activeProject === project && (project
+			? currentFilters.length === 1 && currentFilters[0].getValue() === project
+			: currentFilters.length === 0)) return;
 		this.activeProject = project;
 		try { window.localStorage.setItem('limas.partmanager.project', this.activeProject); }
 		catch (error) { /* Private browsing may disable storage. */ }
-		let filters = this.store.getFilters();
 		filters.beginUpdate();
-		if (this.projectContextFilter) filters.remove(this.projectContextFilter);
+		currentFilters.forEach(function (filter) { filters.remove(filter); });
 		this.projectContextFilter = null;
 		if (this.activeProject) {
 			this.projectContextFilter = Ext.create('Limas.util.Filter', {
@@ -418,6 +424,7 @@ Ext.define('Limas.PartManager', {
 		let project = route.project && this.projectChoices.findRecord('id', route.project, 0, false, true, true)
 			? route.project : '';
 		this.projectSelector.setValue(project || this.allPartsValue);
+		this.onProjectContextChange(this.projectSelector, project);
 		this.grid.catalogField.setValue(route.field);
 		this.grid.setSelectedCatalogDistributors(route.distributors);
 		let search = this.grid.searchField;
