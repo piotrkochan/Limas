@@ -107,6 +107,8 @@ Ext.define('Limas.PartManager', {
 		this.grid.on('duplicateItemWithBasicData', this.onDuplicateItemWithBasicData, this);
 		this.grid.on('duplicateItemWithAllData', this.onDuplicateItemWithAllData, this);
 		this.grid.on('itemcontextmenu', this.onPartContextMenu, this);
+		this.grid.on('presetload', this.applyPendingRoute, this);
+		this.grid.on('presetchange', function () { Limas.getApplication().writeRoute(); }, this);
 		this.grid.searchField.on('beforesearch', this.onBeforePartSearch, this);
 		this.grid.on('catalogselectionchange', function () { Limas.getApplication().writeRoute(); }, this);
 		this.store.on('load', function () { Limas.getApplication().writeRoute(); }, this);
@@ -380,6 +382,8 @@ Ext.define('Limas.PartManager', {
 		let selection = this.grid.getSelectionModel().getSelection();
 		let part = selection.length === 1 && String(selection[0].get('@id') || '').match(/^\/api\/parts\/(\d+)$/);
 		if (part) query.set('part', part[1]);
+		let preset = this.grid.gridPresetButton && this.grid.gridPresetButton.activePresetId;
+		if (preset) query.set('preset', preset);
 		let result = query.toString();
 		return result ? '?' + result : '';
 	},
@@ -392,6 +396,7 @@ Ext.define('Limas.PartManager', {
 			project: integer('project') ? '/api/projects/' + integer('project') : '',
 			category: integer('category'),
 			part: integer('part'),
+			preset: integer('preset'),
 			page: Math.min(Number(integer('page') || 1), 100000),
 			search: (query.get('search') || '').slice(0, 500),
 			field: query.get('field') === 'orderNumber' ? 'orderNumber' : 'sku',
@@ -404,10 +409,12 @@ Ext.define('Limas.PartManager', {
 		this.applyPendingRoute();
 	},
 	applyPendingRoute: function () {
-		if (!this.pendingRoute || !this.projectsLoaded || !this.tree.getStore().isLoaded()) return;
+		if (!this.pendingRoute || !this.projectsLoaded || !this.tree.getStore().isLoaded()
+			|| !this.grid.gridPresetButton || !this.grid.gridPresetButton.presetsLoaded) return;
 		let route = this.pendingRoute;
 		this.pendingRoute = null;
 		this.activeRouteRequest = route;
+		this.grid.gridPresetButton.restorePreset(route.preset);
 		let project = route.project && this.projectChoices.findRecord('id', route.project, 0, false, true, true)
 			? route.project : '';
 		this.projectSelector.setValue(project || this.allPartsValue);

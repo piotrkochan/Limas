@@ -17,6 +17,7 @@ Ext.define('Limas.Components.Grid.SaveGridPresetDialog', {
 
 	grid: null,
 	presetStore: null,
+	onSaved: null,
 
 	initComponent: function () {
 		this.nameField = Ext.create('Ext.form.field.Text', {
@@ -74,6 +75,7 @@ Ext.define('Limas.Components.Grid.SaveGridPresetDialog', {
 		});
 		rec.save({
 			success: Ext.bind(function () {
+				if (this.onSaved) this.onSaved(rec);
 				Ext.toast({
 					html: '<b>' + Ext.htmlEncode(name) + '</b> ' + i18n('saved.'),
 					align: 't',

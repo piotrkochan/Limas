@@ -17,6 +17,9 @@ Ext.define('Limas.Components.Grid.GridPresetButton', {
 
 	grid: null,
 	presetStore: null,
+	activePresetId: null,
+	presetsLoaded: false,
+	initialPresetRestore: true,
 
 	initComponent: function () {
 		this.presetStore = Ext.create('Ext.data.Store', {
@@ -31,6 +34,11 @@ Ext.define('Limas.Components.Grid.GridPresetButton', {
 		// reset the user's current preset selection.
 		this.didAutoApply = false;
 		this.presetStore.on('load', this.maybeAutoApplyDefault, this);
+		this.presetStore.on('load', function () {
+			this.presetsLoaded = true;
+			if (this.activePresetId && !this.getActivePreset()) this.setActivePreset(null);
+			this.grid.fireEvent('presetload');
+		}, this);
 
 		this.callParent(arguments);
 
@@ -46,7 +54,7 @@ Ext.define('Limas.Components.Grid.GridPresetButton', {
 		this.didAutoApply = true;
 		let defaultRec = this.presetStore.findRecord('gridDefault', true, 0, false, false, true);
 		if (defaultRec) {
-			Limas.Components.Grid.GridPresetState.apply(this.grid, defaultRec.get('configuration'));
+			this.onPresetSelect(defaultRec);
 		}
 	},
 
@@ -65,7 +73,13 @@ Ext.define('Limas.Components.Grid.GridPresetButton', {
 		this.menu.removeAll();
 		this.menu.add([
 			{
-				text: i18n('Save current as preset…'),
+				text: i18n('Save current preset'),
+				iconCls: 'fugue-icon disk',
+				disabled: !this.getActivePreset(),
+				handler: Ext.bind(this.onSaveCurrentPreset, this)
+			},
+			{
+				text: i18n('Save as new preset…'),
 				iconCls: 'fugue-icon disk--plus',
 				handler: Ext.bind(this.onSavePreset, this)
 			},
@@ -87,7 +101,8 @@ Ext.define('Limas.Components.Grid.GridPresetButton', {
 			this.menu.add({xtype: 'menuseparator'});
 		}
 		records.forEach(function (rec) {
-			let label = rec.get('name') + (rec.get('gridDefault') ? ' ★' : '');
+			let label = rec.get('name') + (rec.get('gridDefault') ? ' ★' : '')
+				+ (this.presetId(rec) === this.activePresetId ? ' ✓' : '');
 			this.menu.add({
 				text: label,
 				iconCls: 'fugue-icon table',
@@ -98,16 +113,61 @@ Ext.define('Limas.Components.Grid.GridPresetButton', {
 	},
 
 	onDefaultSelect: function () {
+		this.setActivePreset(null);
 		Limas.Components.Grid.GridPresetState.applyDefault(this.grid);
 	},
 	onPresetSelect: function (rec) {
+		this.setActivePreset(rec);
 		Limas.Components.Grid.GridPresetState.apply(this.grid, rec.get('configuration'));
+	},
+	presetId: function (rec) {
+		let match = rec && String(rec.get('@id') || '').match(/^\/api\/grid_presets\/([1-9]\d*)$/);
+		return match ? match[1] : null;
+	},
+	getActivePreset: function () {
+		let id = this.activePresetId;
+		return id && this.presetStore.getRange().find(function (rec) {
+			return this.presetId(rec) === id;
+		}, this);
+	},
+	setActivePreset: function (rec) {
+		this.activePresetId = this.presetId(rec);
+		this.rebuildMenu();
+		this.grid.fireEvent('presetchange');
+	},
+	restorePreset: function (id) {
+		if (!id && this.initialPresetRestore && this.activePresetId) {
+			this.initialPresetRestore = false;
+			return;
+		}
+		this.initialPresetRestore = false;
+		let rec = id && this.presetStore.getRange().find(function (entry) {
+			return this.presetId(entry) === id;
+		}, this);
+		if (rec) this.onPresetSelect(rec);
+		else this.onDefaultSelect();
+	},
+	onSaveCurrentPreset: function () {
+		let rec = this.getActivePreset();
+		if (!rec) return;
+		rec.set('configuration', Ext.encode(Limas.Components.Grid.GridPresetState.capture(this.grid)));
+		rec.save({
+			success: Ext.bind(function () {
+				Ext.toast({html: '<b>' + Ext.htmlEncode(rec.get('name')) + '</b> ' + i18n('saved.'), align: 't', autoCloseDelay: 3000});
+				this.presetStore.load();
+			}, this),
+			failure: Ext.bind(function () {
+				rec.reject();
+				Ext.Msg.alert(i18n('Error'), i18n('Could not save the preset.'));
+			}, this)
+		});
 	},
 
 	onSavePreset: function () {
 		Ext.create('Limas.Components.Grid.SaveGridPresetDialog', {
 			grid: this.grid,
-			presetStore: this.presetStore
+			presetStore: this.presetStore,
+			onSaved: Ext.bind(this.setActivePreset, this)
 		}).show();
 	},
 	onManagePresets: function () {

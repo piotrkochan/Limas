@@ -53,9 +53,10 @@ Ext.define('Limas.PagingToolbar', {
 
 		items.push({xtype: 'tbseparator'});
 
-		items.push(Ext.create('Limas.Components.Grid.GridPresetButton', {
+		this.grid.gridPresetButton = Ext.create('Limas.Components.Grid.GridPresetButton', {
 			grid: this.grid
-		}));
+		});
+		items.push(this.grid.gridPresetButton);
 
 		return items;
 	},

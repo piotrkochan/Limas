@@ -135,13 +135,14 @@ const routeContext = {
   selectedCategory: {get: key => key === '@id' ? '/api/part_categories/123' : null},
   store: {currentPage: 2},
   grid: {
+    gridPresetButton: {activePresetId: '42'},
     selectedDistributorField: 'orderNumber',
     selectedDistributorIds: ['/api/distributors/30', '/api/distributors/31'],
     searchField: {hasSearch: true, getValue: () => 'SR6863D'},
     getSelectionModel: () => ({getSelection: () => [{get: () => '/api/parts/456'}]})
   }
 };
-assert.equal(manager.getRouteQuery.call(routeContext), '?project=78&category=123&page=2&search=SR6863D&field=orderNumber&distributors=30%2C31&part=456');
+assert.equal(manager.getRouteQuery.call(routeContext), '?project=78&category=123&page=2&search=SR6863D&field=orderNumber&distributors=30%2C31&part=456&preset=42');
 
 let selectedPart;
 let selectedCategory;
@@ -163,6 +164,7 @@ const restoreContext = {
     options.callback.call(options.scope, [part]);
   }},
   grid: {
+    gridPresetButton: {presetsLoaded: true, restorePreset: id => { restoreContext.preset = id; }},
     catalogField: {setValue: value => { restoreContext.field = value; }},
     setSelectedCatalogDistributors: ids => { restoreContext.distributors = ids; },
     searchField: {hasSearch: false, getValue: () => '', setValue: value => { restoreContext.search = value; }, startSearch: () => {}},
@@ -171,9 +173,10 @@ const restoreContext = {
   onCategoryClick: () => {},
   applyPendingRoute() { manager.applyPendingRoute.call(this); }
 };
-manager.applyRouteQuery.call(restoreContext, new URLSearchParams('project=78&category=123&page=2&part=456&search=SR6863D&field=orderNumber&distributors=30,31'));
+manager.applyRouteQuery.call(restoreContext, new URLSearchParams('project=78&category=123&page=2&part=456&preset=42&search=SR6863D&field=orderNumber&distributors=30,31'));
 assert.equal(restoreContext.project, '/api/projects/78');
 assert.equal(restoreContext.field, 'orderNumber');
+assert.equal(restoreContext.preset, '42');
 assert.equal(restoreContext.search, 'SR6863D');
 assert.deepEqual(Array.from(restoreContext.distributors), ['/api/distributors/30', '/api/distributors/31']);
 assert.equal(selectedCategory, category);
