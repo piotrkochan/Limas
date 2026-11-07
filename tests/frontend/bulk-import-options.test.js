@@ -24,6 +24,7 @@ class FakeFormData {
 const context = {
   Ext,
   FormData: FakeFormData,
+  Blob,
   i18n: value => value,
   Limas: {
     getBasePath: () => '',
@@ -94,4 +95,46 @@ classes['Limas.Importer.GridImporterButton'].onImport.call({
   grid: {getStore: () => ({getModel: () => model})}
 });
 assert.equal(opened.items.model, model);
-console.log('Bulk import quantity options and legacy importer button passed');
+
+const reviewStore = {
+  rows: [],
+  loadData(rows) { this.rows = rows; },
+  getCount() { return this.rows.length; }
+};
+const selection = {
+  selected: [],
+  selectAll() { this.selected = reviewStore.rows.map(row => ({get: key => row[key]})); },
+  getSelection() { return this.selected; }
+};
+const review = Object.assign({}, dialog, {
+  parsedRows: [
+    ['MPN', 'LCSC', 'Qty'],
+    ['first', 'C1', '10'],
+    ['second,"part"', 'C2', '20']
+  ],
+  csvDelimiter: ',',
+  reviewStore,
+  reviewGrid: {getSelectionModel: () => selection},
+  reviewCount: {setText(value) { review.count = value; }},
+  reviewStartButton: {setDisabled(value) { review.startDisabled = value; }},
+  getLayout: () => ({setActiveItem: value => { review.activeCard = value; }}),
+  refreshReviewCount() { bulk.refreshReviewCount.call(this); },
+  selectedCsvFile() { return bulk.selectedCsvFile.call(this); }
+});
+review.projectModeCombo = field('inventory');
+review.mpnColumn = field(0);
+review.lcscColumn = field(1);
+review.qtyColumn = field(2);
+review.hasHeaderCheckbox = field(true);
+bulk.onReview.call(review);
+assert.equal(review.activeCard, 'step-review');
+assert.equal(review.count, '2 / 2 selected');
+selection.selected = [selection.selected[1]];
+bulk.refreshReviewCount.call(review);
+assert.equal(review.count, '1 / 2 selected');
+bulk.onSubmit.call(review);
+assert.equal(request.url, '/api/bulk-import');
+request.rawData.values.file.text().then(text => {
+  assert.equal(text, 'MPN,LCSC,Qty\r\n"second,""part""",C2,20\r\n');
+  console.log('Bulk import review selects rows locally; existing API receives only selected CSV rows');
+}).catch(error => { throw error; });

@@ -60,6 +60,7 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 	initComponent: function () {
 		this.items = [
 			this.buildStepMapping(),
+			this.buildStepReview(),
 			this.buildStepProgress()
 		];
 		this.callParent(arguments);
@@ -224,10 +225,10 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 		});
 
 		this.submitButton = Ext.create('Ext.button.Button', {
-			text: i18n('Start Import'),
+			text: i18n('Review parts'),
 			iconCls: 'fugue-icon arrow-circle-225',
 			disabled: true,
-			handler: () => me.onSubmit()
+			handler: () => me.onReview()
 		});
 
 		// Progressive disclosure: only the drop area is visible at
@@ -240,7 +241,7 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 			defaults: {anchor: '100%'},
 			hidden: true,
 			items: [
-				{xtype: 'tbtext', html: '<b>' + i18n('Step 1 of 2 — local preview, no upload yet') + '</b>', margin: '8 0'},
+				{xtype: 'tbtext', html: '<b>' + i18n('Step 1 of 3 — map the CSV columns') + '</b>', margin: '8 0'},
 				this.previewPanel,
 				{
 					// Side-by-side: column mapping (the long stack) on the
@@ -363,6 +364,7 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 		let reader = new FileReader();
 		reader.onload = (ev) => {
 			let text = ev.target.result;
+			this.csvDelimiter = this.detectCsvDelimiter(text);
 			this.parsedRows = this.parseCsv(text);
 			if (this.parsedRows.length === 0) {
 				Ext.toast({
@@ -432,6 +434,17 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 			rows.push(row);
 		}
 		return rows.filter(r => r.length > 0 && !(r.length === 1 && r[0] === ''));
+	},
+
+	detectCsvDelimiter: function (text) {
+		let head = text.split('\n', 1)[0];
+		let delimiter = ',';
+		let most = head.split(',').length;
+		[';', '\t', '|'].forEach(function (candidate) {
+			let count = head.split(candidate).length;
+			if (count > most) { most = count; delimiter = candidate; }
+		});
+		return delimiter;
 	},
 
 	populateColumnCombos: function () {
@@ -548,6 +561,92 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 		return null;
 	},
 
+	buildStepReview: function () {
+		let safe = value => Ext.htmlEncode(String(value || ''));
+		this.reviewStore = Ext.create('Ext.data.Store', {
+			fields: ['rawIndex', 'line', 'mpn', 'lcsc', 'manufacturer', 'quantity', 'designator', 'footprint', 'comment'],
+			data: []
+		});
+		this.reviewGrid = Ext.create('Ext.grid.Panel', {
+			flex: 1,
+			store: this.reviewStore,
+			selModel: {selType: 'checkboxmodel', mode: 'MULTI', showHeaderCheckbox: true},
+			viewConfig: {enableTextSelection: true},
+			columns: [
+				{text: '#', dataIndex: 'line', width: 55},
+				{text: 'MPN', dataIndex: 'mpn', flex: 2, renderer: safe},
+				{text: 'LCSC', dataIndex: 'lcsc', flex: 1, renderer: safe},
+				{text: i18n('Manufacturer'), dataIndex: 'manufacturer', flex: 1, renderer: safe},
+				{text: i18n('Quantity'), dataIndex: 'quantity', width: 90, renderer: safe},
+				{text: i18n('Designator'), dataIndex: 'designator', flex: 1, renderer: safe},
+				{text: i18n('Footprint'), dataIndex: 'footprint', flex: 1, renderer: safe},
+				{text: i18n('Comment'), dataIndex: 'comment', flex: 2, renderer: safe}
+			]
+		});
+		this.reviewCount = Ext.create('Ext.toolbar.TextItem', {text: ''});
+		this.reviewStartButton = Ext.create('Ext.button.Button', {
+			text: i18n('Start Import'), iconCls: 'fugue-icon arrow-circle-225',
+			handler: () => this.onSubmit()
+		});
+		this.reviewGrid.getSelectionModel().on('selectionchange', this.refreshReviewCount, this);
+		return Ext.create('Ext.panel.Panel', {
+			itemId: 'step-review', layout: 'vbox', bodyPadding: 12,
+			defaults: {width: '100%'},
+			items: [
+				{xtype: 'component', html: '<b>' + i18n('Step 2 of 3 — select parts to import') + '</b>', margin: '0 0 8 0'},
+				this.reviewGrid
+			],
+			dockedItems: [{xtype: 'toolbar', dock: 'bottom', items: [
+				{text: i18n('Back'), handler: () => this.getLayout().setActiveItem('step-mapping')},
+				'->', this.reviewCount, this.reviewStartButton
+			]}]
+		});
+	},
+
+	onReview: function () {
+		if (!this.parsedRows || !this.parsedRows.length) return;
+		let columns = {
+			mpn: this.mpnColumn.getValue(), lcsc: this.lcscColumn.getValue(),
+			manufacturer: this.mfrColumn.getValue(), quantity: this.qtyColumn.getValue(),
+			designator: this.designatorColumn.getValue(), footprint: this.footprintColumn.getValue(),
+			comment: this.commentColumn.getValue()
+		};
+		let start = this.hasHeaderCheckbox.getValue() ? 1 : 0;
+		let rows = this.parsedRows.slice(start).map(function (row, index) {
+			let item = {rawIndex: start + index, line: start + index + 1};
+			Object.keys(columns).forEach(function (field) {
+				item[field] = columns[field] === null ? '' : (row[columns[field]] || '');
+			});
+			return item;
+		});
+		this.reviewStore.loadData(rows);
+		this.reviewGrid.getSelectionModel().selectAll();
+		this.refreshReviewCount();
+		this.getLayout().setActiveItem('step-review');
+	},
+
+	refreshReviewCount: function () {
+		let selected = this.reviewGrid.getSelectionModel().getSelection().length;
+		this.reviewCount.setText(selected + ' / ' + this.reviewStore.getCount() + ' ' + i18n('selected'));
+		this.reviewStartButton.setDisabled(selected === 0);
+	},
+
+	selectedCsvFile: function () {
+		let selection = this.reviewGrid.getSelectionModel().getSelection();
+		let indexes = selection.map(function (record) { return record.get('rawIndex'); }).sort(function (a, b) { return a - b; });
+		let rows = indexes.map(function (index) { return this.parsedRows[index]; }, this);
+		if (this.hasHeaderCheckbox.getValue()) rows.unshift(this.parsedRows[0]);
+		let delimiter = this.csvDelimiter || ',';
+		let text = rows.map(function (row) {
+			return row.map(function (value) {
+				let cell = String(value === null || value === undefined ? '' : value);
+				return cell.includes(delimiter) || /["\r\n]/.test(cell)
+					? '"' + cell.replace(/"/g, '""') + '"' : cell;
+			}).join(delimiter);
+		}).join('\r\n') + '\r\n';
+		return new Blob([text], {type: 'text/csv;charset=utf-8'});
+	},
+
 	// ──────────────────────────── STEP 2 ────────────────────────────
 
 	// Step 2 deliberately uses plain Ext.panel.Panel + setHtml for the
@@ -658,6 +757,7 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 	},
 
 	onSubmit: function () {
+		if (this.reviewGrid && this.reviewGrid.getSelectionModel().getSelection().length === 0) return;
 		let catIri = this.extractIri(this.defaultCategoryCombo.getValue());
 		let stoIri = this.extractIri(this.defaultStorageCombo.getValue());
 		if (!catIri || !stoIri) {
@@ -689,7 +789,7 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 		if (this.qtyColumn.getValue() !== null) meta.mapping.quantity = this.qtyColumn.getValue();
 
 		let fd = new FormData();
-		fd.append('file', this.parsedFile);
+		fd.append('file', this.reviewGrid ? this.selectedCsvFile() : this.parsedFile, this.parsedFile.name);
 		fd.append('meta', JSON.stringify(meta));
 
 		Ext.Ajax.request({
