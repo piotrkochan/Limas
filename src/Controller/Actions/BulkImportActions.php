@@ -6,13 +6,18 @@ use Doctrine\ORM\EntityManagerInterface;
 use Limas\Entity\BulkImportJob;
 use Limas\Entity\BulkImportJobItem;
 use Limas\Entity\PartCategory;
+use Limas\Entity\PartDistributor;
+use Limas\Entity\PartManufacturer;
+use Limas\Entity\ManufacturerAlias;
 use Limas\Entity\Project;
+use Limas\Entity\ProjectPart;
 use Limas\Entity\StorageLocation;
 use Limas\Entity\User;
 use Limas\Message\BulkImportJobMessage;
 use Limas\Service\Integration\InfoProvider\BulkImportCsvParser;
 use Limas\Service\Integration\InfoProvider\BulkImportProjectProcessor;
 use Limas\Service\Integration\InfoProvider\Enum\BulkImportDuplicatesBehavior;
+use Limas\Service\ManufacturerCanonicalizer;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -45,6 +50,138 @@ class BulkImportActions
 		private readonly BulkImportProjectProcessor $projectProcessor
 	)
 	{
+	}
+
+	#[Route(path: '/api/bulk-import/lookup', methods: ['POST'])]
+	public function lookupAction(Request $request): JsonResponse
+	{
+		$data = json_decode($request->getContent(), true);
+		$rows = $data['rows'] ?? null;
+		if (!is_array($rows) || !array_is_list($rows) || count($rows) > 250) {
+			return new JsonResponse(['error' => 'rows must be a list of at most 250 items'], 400);
+		}
+		$projectId = $data['projectId'] ?? null;
+		if ($projectId !== null && (!is_int($projectId) || $projectId < 1)) {
+			return new JsonResponse(['error' => 'projectId must be a positive integer'], 400);
+		}
+		if ($projectId !== null && $this->em->find(Project::class, $projectId) === null) {
+			return new JsonResponse(['error' => 'Project not found'], 404);
+		}
+
+		$lcscIds = [];
+		$mpns = [];
+		$manufacturerNames = [];
+		foreach ($rows as $row) {
+			if (!is_array($row)) return new JsonResponse(['error' => 'Each row must be an object'], 400);
+			foreach (['lcsc', 'mpn', 'manufacturer'] as $field) {
+				if (isset($row[$field]) && (!is_string($row[$field]) || mb_strlen($row[$field]) > 255)) {
+					return new JsonResponse(['error' => $field . ' must be a string of at most 255 characters'], 400);
+				}
+			}
+			$lcsc = strtoupper(trim((string)($row['lcsc'] ?? '')));
+			$mpn = mb_strtolower(trim((string)($row['mpn'] ?? '')));
+			if ($lcsc !== '') $lcscIds[$lcsc] = $lcsc;
+			elseif ($mpn !== '') {
+				$mpns[$mpn] = $mpn;
+				$name = ManufacturerCanonicalizer::normalize((string)($row['manufacturer'] ?? ''));
+				if ($name !== '') $manufacturerNames[$name] = $name;
+			}
+		}
+		$aliases = [];
+		if ($manufacturerNames !== []) {
+			$aliasRows = $this->em->createQueryBuilder()
+				->select('a.aliasNormalized AS aliasName', 'm.id AS manufacturerId')
+				->from(ManufacturerAlias::class, 'a')
+				->leftJoin('a.manufacturer', 'm')
+				->where('a.aliasNormalized IN (:names)')
+				->setParameter('names', array_values($manufacturerNames))
+				->getQuery()->getArrayResult();
+			foreach ($aliasRows as $alias) $aliases[$alias['aliasName']] = $alias['manufacturerId'] !== null ? (int)$alias['manufacturerId'] : null;
+		}
+
+		$byLcsc = [];
+		if ($lcscIds !== []) {
+			$offers = $this->em->createQueryBuilder()
+				->select('pd.sku AS sku', 'pd.orderNumber AS orderNumber', 'p.id AS partId', 'p.name AS partName')
+				->from(PartDistributor::class, 'pd')
+				->join('pd.part', 'p')
+				->join('pd.distributor', 'd')
+				->where('LOWER(d.name) = :source')
+				->andWhere('(pd.sku IN (:ids) OR pd.orderNumber IN (:ids))')
+				->setParameter('source', 'lcsc')
+				->setParameter('ids', array_values($lcscIds))
+				->getQuery()->getArrayResult();
+			foreach ($offers as $offer) {
+				foreach (['sku', 'orderNumber'] as $field) {
+					$key = strtoupper(trim((string)($offer[$field] ?? '')));
+					if (isset($lcscIds[$key])) $byLcsc[$key][(int)$offer['partId']] = ['id' => (int)$offer['partId'], 'name' => $offer['partName']];
+				}
+			}
+		}
+
+		$byMpn = [];
+		if ($mpns !== []) {
+			$manufacturers = $this->em->createQueryBuilder()
+				->select('pm.partNumber AS mpn', 'm.name AS manufacturer', 'm.id AS manufacturerId', 'p.id AS partId', 'p.name AS partName')
+				->from(PartManufacturer::class, 'pm')
+				->join('pm.part', 'p')
+				->join('pm.manufacturer', 'm')
+				->where('LOWER(TRIM(pm.partNumber)) IN (:mpns)')
+				->setParameter('mpns', array_values($mpns))
+				->getQuery()->getArrayResult();
+			foreach ($manufacturers as $manufacturer) {
+				$key = mb_strtolower(trim((string)$manufacturer['mpn']));
+				$byMpn[$key][] = $manufacturer;
+			}
+		}
+
+		$matchesByRow = [];
+		$partIds = [];
+		foreach ($rows as $row) {
+			$lcsc = strtoupper(trim((string)($row['lcsc'] ?? '')));
+			$mpn = mb_strtolower(trim((string)($row['mpn'] ?? '')));
+			$matches = $lcsc !== '' ? ($byLcsc[$lcsc] ?? []) : [];
+			if ($lcsc === '' && $mpn !== '') {
+				$rawManufacturer = trim((string)($row['manufacturer'] ?? ''));
+				$manufacturerKey = $rawManufacturer !== '' ? ManufacturerCanonicalizer::normalize($rawManufacturer) : null;
+				foreach ($byMpn[$mpn] ?? [] as $candidate) {
+					if ($manufacturerKey !== null) {
+						if (array_key_exists($manufacturerKey, $aliases)) {
+							if ($aliases[$manufacturerKey] !== (int)$candidate['manufacturerId']) continue;
+						} elseif (ManufacturerCanonicalizer::normalize((string)$candidate['manufacturer']) !== $manufacturerKey) continue;
+					}
+					$id = (int)$candidate['partId'];
+					$matches[$id] = ['id' => $id, 'name' => $candidate['partName']];
+				}
+			}
+			$matchesByRow[] = array_values($matches);
+			foreach ($matches as $id => $match) $partIds[$id] = $id;
+		}
+
+		$inProject = [];
+		if ($projectId !== null && $partIds !== []) {
+			$projectParts = $this->em->createQueryBuilder()
+				->select('p.id AS partId')
+				->from(ProjectPart::class, 'pp')
+				->join('pp.part', 'p')
+				->where('pp.project = :project')
+				->andWhere('p.id IN (:ids)')
+				->setParameter('project', $projectId)
+				->setParameter('ids', array_values($partIds))
+				->getQuery()->getArrayResult();
+			foreach ($projectParts as $part) $inProject[(int)$part['partId']] = true;
+		}
+
+		$results = [];
+		foreach ($matchesByRow as $matches) {
+			$count = count($matches);
+			$results[] = [
+				'status' => $count === 0 ? 'new' : ($count === 1 ? 'existing' : 'multiple'),
+				'matches' => $matches,
+				'projectStatus' => $projectId === null ? null : ($count === 0 ? 'new' : ($count > 1 ? 'multiple' : (isset($inProject[$matches[0]['id']]) ? 'in' : 'not_in')))
+			];
+		}
+		return new JsonResponse(['results' => $results]);
 	}
 
 	#[Route(path: '/api/bulk-import', methods: ['POST'])]

@@ -564,8 +564,12 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 	buildStepReview: function () {
 		let safe = value => Ext.htmlEncode(String(value || ''));
 		this.reviewStore = Ext.create('Ext.data.Store', {
-			fields: ['rawIndex', 'line', 'mpn', 'lcsc', 'manufacturer', 'quantity', 'designator', 'footprint', 'comment'],
+			fields: ['rawIndex', 'line', 'mpn', 'lcsc', 'manufacturer', 'quantity', 'designator', 'footprint', 'comment', 'inventoryStatus', 'projectStatus', 'matches'],
 			data: []
+		});
+		this.reviewProjectColumn = Ext.create('Ext.grid.column.Column', {
+			text: i18n('Selected project'), dataIndex: 'projectStatus', width: 155, hidden: true,
+			renderer: value => this.renderReviewStatus(value, 'project')
 		});
 		this.reviewGrid = Ext.create('Ext.grid.Panel', {
 			flex: 1,
@@ -576,6 +580,9 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 				{text: '#', dataIndex: 'line', width: 55},
 				{text: 'MPN', dataIndex: 'mpn', flex: 2, renderer: safe},
 				{text: 'LCSC', dataIndex: 'lcsc', flex: 1, renderer: safe},
+				{text: i18n('Inventory'), dataIndex: 'inventoryStatus', width: 175,
+					renderer: (value, meta, record) => this.renderReviewStatus(value, 'inventory', record)},
+				this.reviewProjectColumn,
 				{text: i18n('Manufacturer'), dataIndex: 'manufacturer', flex: 1, renderer: safe},
 				{text: i18n('Quantity'), dataIndex: 'quantity', width: 90, renderer: safe},
 				{text: i18n('Designator'), dataIndex: 'designator', flex: 1, renderer: safe},
@@ -603,6 +610,25 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 		});
 	},
 
+	renderReviewStatus: function (status, kind, record) {
+		let labels = kind === 'project' ? {
+			checking: 'Checking…', in: 'Already in project', not_in: 'Not in project',
+			new: 'New part', multiple: 'Multiple matches', error: 'Check failed'
+		} : {
+			checking: 'Checking…', existing: 'In inventory', new: 'New to inventory',
+			multiple: 'Multiple matches', error: 'Check failed'
+		};
+		let colors = {
+			in: '#d5f2df', existing: '#d5f2df', not_in: '#e4efff', new: '#e4efff',
+			multiple: '#fff0c7', error: '#ffe4e4', checking: '#eeeeee'
+		};
+		let matches = record && record.get ? record.get('matches') || [] : [];
+		let suffix = kind === 'inventory' && status === 'existing' && matches.length === 1 ? ' · #' + matches[0].id : '';
+		let title = matches.map(match => '#' + match.id + ' ' + match.name).join('; ');
+		return '<span title="' + Ext.htmlEncode(title) + '" style="display:inline-block;padding:2px 6px;border-radius:4px;background:' +
+			(colors[status] || colors.checking) + '">' + Ext.htmlEncode(i18n(labels[status] || labels.checking) + suffix) + '</span>';
+	},
+
 	onReview: function () {
 		if (!this.parsedRows || !this.parsedRows.length) return;
 		let columns = {
@@ -613,22 +639,64 @@ Ext.define('Limas.Components.BulkImport.BulkImportWindow', {
 		};
 		let start = this.hasHeaderCheckbox.getValue() ? 1 : 0;
 		let rows = this.parsedRows.slice(start).map(function (row, index) {
-			let item = {rawIndex: start + index, line: start + index + 1};
+			let item = {rawIndex: start + index, line: start + index + 1,
+				inventoryStatus: 'checking', projectStatus: 'checking', matches: []};
 			Object.keys(columns).forEach(function (field) {
 				item[field] = columns[field] === null ? '' : (row[columns[field]] || '');
 			});
 			return item;
 		});
 		this.reviewStore.loadData(rows);
+		let projectId = this.projectModeCombo.getValue() === 'existing' ? Number(this.projectCombo.getValue()) : null;
+		this.reviewProjectColumn.setHidden(!projectId);
 		this.reviewGrid.getSelectionModel().selectAll();
 		this.refreshReviewCount();
 		this.getLayout().setActiveItem('step-review');
+		this.lookupReviewRows(rows, projectId);
+	},
+
+	lookupReviewRows: function (rows, projectId) {
+		let generation = this.reviewLookupGeneration = (this.reviewLookupGeneration || 0) + 1;
+		this.reviewLookupPending = Math.ceil(rows.length / 250);
+		this.refreshReviewCount();
+		for (let start = 0; start < rows.length; start += 250) {
+			let chunk = rows.slice(start, start + 250);
+			let finish = (results) => {
+				if (generation !== this.reviewLookupGeneration) return;
+				chunk.forEach((row, index) => {
+					let record = this.reviewStore.getAt(start + index);
+					if (!record) return;
+					let result = results && results[index];
+					record.set({
+						inventoryStatus: result ? result.status : 'error',
+						projectStatus: result ? result.projectStatus : 'error',
+						matches: result ? result.matches : []
+					});
+				});
+				this.reviewLookupPending--;
+				this.refreshReviewCount();
+			};
+			Ext.Ajax.request({
+				url: Limas.getBasePath() + '/api/bulk-import/lookup',
+				method: 'POST',
+				jsonData: {
+					rows: chunk.map(row => ({mpn: row.mpn, manufacturer: row.manufacturer, lcsc: row.lcsc})),
+					projectId: projectId || null
+				},
+				headers: Limas.Auth.AuthenticationProvider.getAuthenticationProvider().getHeaders(),
+				success: response => {
+					try { finish(Ext.decode(response.responseText).results); }
+					catch (error) { finish(null); }
+				},
+				failure: () => finish(null)
+			});
+		}
 	},
 
 	refreshReviewCount: function () {
 		let selected = this.reviewGrid.getSelectionModel().getSelection().length;
 		this.reviewCount.setText(selected + ' / ' + this.reviewStore.getCount() + ' ' + i18n('selected'));
-		this.reviewStartButton.setDisabled(selected === 0);
+		this.reviewStartButton.setDisabled(selected === 0 || this.reviewLookupPending > 0);
 	},
 
 	selectedCsvFile: function () {

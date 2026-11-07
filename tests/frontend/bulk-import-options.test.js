@@ -15,6 +15,7 @@ const Ext = {
   },
   Ajax: {request: config => { request = config; }},
   Msg: {alert: () => { throw new Error('Unexpected alert'); }},
+  decode: JSON.parse,
   htmlEncode: value => String(value)
 };
 class FakeFormData {
@@ -99,7 +100,11 @@ assert.equal(opened.items.model, model);
 const reviewStore = {
   rows: [],
   loadData(rows) { this.rows = rows; },
-  getCount() { return this.rows.length; }
+  getCount() { return this.rows.length; },
+  getAt(index) {
+    const row = this.rows[index];
+    return row && {set(values) { Object.assign(row, values); }};
+  }
 };
 const selection = {
   selected: [],
@@ -115,10 +120,12 @@ const review = Object.assign({}, dialog, {
   csvDelimiter: ',',
   reviewStore,
   reviewGrid: {getSelectionModel: () => selection},
+  reviewProjectColumn: {setHidden(value) { review.projectColumnHidden = value; }},
   reviewCount: {setText(value) { review.count = value; }},
   reviewStartButton: {setDisabled(value) { review.startDisabled = value; }},
   getLayout: () => ({setActiveItem: value => { review.activeCard = value; }}),
   refreshReviewCount() { bulk.refreshReviewCount.call(this); },
+  lookupReviewRows(rows, projectId) { bulk.lookupReviewRows.call(this, rows, projectId); },
   selectedCsvFile() { return bulk.selectedCsvFile.call(this); }
 });
 review.projectModeCombo = field('inventory');
@@ -129,6 +136,29 @@ review.hasHeaderCheckbox = field(true);
 bulk.onReview.call(review);
 assert.equal(review.activeCard, 'step-review');
 assert.equal(review.count, '2 / 2 selected');
+assert.equal(review.projectColumnHidden, true);
+assert.equal(review.startDisabled, true);
+assert.equal(request.url, '/api/bulk-import/lookup');
+assert.equal(request.jsonData.projectId, null);
+assert.equal(request.jsonData.rows[0].lcsc, 'C1');
+request.success({responseText: JSON.stringify({results: [
+  {status: 'existing', matches: [{id: 12, name: 'first'}], projectStatus: null},
+  {status: 'new', matches: [], projectStatus: null}
+]})});
+assert.equal(reviewStore.rows[0].inventoryStatus, 'existing');
+assert.equal(reviewStore.rows[1].inventoryStatus, 'new');
+assert.equal(review.startDisabled, false);
+review.projectModeCombo.value = 'existing';
+bulk.onReview.call(review);
+assert.equal(review.projectColumnHidden, false);
+assert.equal(request.jsonData.projectId, 6);
+request.success({responseText: JSON.stringify({results: [
+  {status: 'existing', matches: [{id: 12, name: 'first'}], projectStatus: 'in'},
+  {status: 'existing', matches: [{id: 13, name: 'second'}], projectStatus: 'not_in'}
+]})});
+assert.equal(reviewStore.rows[0].projectStatus, 'in');
+assert.equal(reviewStore.rows[1].projectStatus, 'not_in');
+assert.match(bulk.renderReviewStatus.call(review, 'existing', 'inventory', {get: () => [{id: 12, name: 'first'}]}), /#12/);
 selection.selected = [selection.selected[1]];
 bulk.refreshReviewCount.call(review);
 assert.equal(review.count, '1 / 2 selected');
