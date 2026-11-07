@@ -41,4 +41,7 @@ framework:
             aggregator.cache:
                 adapter: app.cache.adapter.redis
                 default_lifetime: 300
+            distributor_refresh_preview.cache:
+                adapter: app.cache.adapter.redis
+                default_lifetime: 1800
             #my.dedicated.cache: null

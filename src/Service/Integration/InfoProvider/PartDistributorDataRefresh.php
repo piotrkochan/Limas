@@ -12,6 +12,8 @@ use Limas\Entity\PartManufacturer;
 use Limas\Service\Integration\InfoProvider\Dto\InfoProviderResult;
 use Limas\Service\Integration\InfoProvider\Dto\InfoProviderSearchResult;
 use Limas\Service\ManufacturerCanonicalizer;
+use Psr\Cache\CacheItemPoolInterface;
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 /** Builds a field-by-field preview and applies only explicitly selected changes. */
 final readonly class PartDistributorDataRefresh
@@ -19,37 +21,86 @@ final readonly class PartDistributorDataRefresh
 	public function __construct(
 		private EntityManagerInterface $em,
 		private InfoProviderAggregator $providers,
-		private ManufacturerCanonicalizer $manufacturerCanonicalizer
+		private ManufacturerCanonicalizer $manufacturerCanonicalizer,
+		#[Autowire(service: 'distributor_refresh_preview.cache')]
+		private CacheItemPoolInterface $previewCache
 	) {}
 
 	/** @param list<int> $partIds */
 	public function preview(array $partIds): array
 	{
-		[$rows, , $skipped, $unchanged] = $this->collect($partIds);
-		return ['rows' => $rows, 'unchanged' => $unchanged, 'skipped' => $skipped];
+		[$rows, $updates, $skipped, $unchanged] = $this->collect($partIds);
+		$previewId = bin2hex(random_bytes(24));
+		$snapshotRows = [];
+		foreach ($rows as $row) {
+			[$target, $field, $value, $current] = $updates[$row['key']];
+			$snapshotRows[$row['key']] = [
+				'fingerprint' => $row['fingerprint'],
+				'partId' => $row['partId'], 'distributor' => $row['distributor'], 'label' => $row['label'],
+				'targetType' => $target instanceof PartDistributor ? 'offer' : 'part',
+				'targetId' => $target->getId(), 'field' => $field, 'value' => $value, 'current' => $current
+			];
+		}
+		$item = $this->previewCache->getItem('preview_' . $previewId);
+		$item->set(['partIds' => array_values($partIds), 'rows' => $snapshotRows]);
+		$item->expiresAfter(1800);
+		$this->previewCache->save($item);
+		return ['previewId' => $previewId, 'rows' => $rows, 'unchanged' => $unchanged, 'skipped' => $skipped];
 	}
 
 	/** @param list<int> $partIds
 	 *  @param array<string, string> $selected Fingerprints from the preview.
 	 */
-	public function apply(array $partIds, array $selected): array
+	public function apply(array $partIds, array $selected, string $previewId): array
 	{
-		[$rows, $updates, $skipped] = $this->collect($partIds);
+		$item = $this->previewCache->getItem('preview_' . $previewId);
+		$snapshot = $item->isHit() ? $item->get() : null;
+		if (!is_array($snapshot) || !isset($snapshot['partIds'], $snapshot['rows'])) {
+			throw new \RuntimeException('Preview expired. Refresh distributor data and select changes again.');
+		}
+		$expectedIds = $snapshot['partIds'];
+		$providedIds = $partIds;
+		sort($expectedIds);
+		sort($providedIds);
+		if ($expectedIds !== $providedIds) {
+			throw new \RuntimeException('Preview does not match the selected parts. Refresh the preview.');
+		}
+		$rows = $snapshot['rows'];
+		$skipped = [];
 		$connection = $this->em->getConnection();
 		$connection->beginTransaction();
 		try {
 			$updated = 0;
-			$seen = [];
-			foreach ($rows as $row) {
-				$key = $row['key'];
-				if (!isset($selected[$key])) continue;
-				$seen[$key] = true;
-				if (!hash_equals($row['fingerprint'], $selected[$key])) {
-					$skipped[] = ['partId' => $row['partId'], 'distributor' => $row['distributor'],
-						'reason' => $row['label'] . ' changed since preview'];
+			$pending = [];
+			foreach ($selected as $key => $fingerprint) {
+				$row = $rows[$key] ?? null;
+				if ($row === null) {
+					$skipped[] = ['partId' => (int)explode(':', $key, 2)[0], 'distributor' => '',
+						'reason' => 'Field was not in the preview'];
 					continue;
 				}
-				[$target, $field, $value] = $updates[$key];
+				if (!hash_equals($row['fingerprint'], $fingerprint)) {
+					$skipped[] = ['partId' => $row['partId'], 'distributor' => $row['distributor'],
+						'reason' => 'Preview selection mismatch'];
+					continue;
+				}
+				$target = $this->em->find($row['targetType'] === 'offer' ? PartDistributor::class : Part::class, $row['targetId']);
+				if ($target === null || ($target instanceof PartDistributor
+					? $target->getPart()->getId() : $target->getId()) !== $row['partId']) {
+					$skipped[] = ['partId' => $row['partId'], 'distributor' => $row['distributor'],
+						'reason' => 'Part or distributor offer no longer exists'];
+					continue;
+				}
+				$field = $row['field'];
+				$value = $row['value'];
+				if ($field !== 'offer' && !$this->sameValue($field, $this->currentValue($target, $field), $row['current'])) {
+				$skipped[] = ['partId' => $row['partId'], 'distributor' => $row['distributor'],
+					'reason' => $row['label'] . ' changed in Limas since preview'];
+				continue;
+				}
+				$pending[] = [$row, $target, $field, $value];
+			}
+			foreach ($pending as [$row, $target, $field, $value]) {
 				if ($field === 'offer') {
 					if (!$this->addOffer($target, $value)) {
 						$skipped[] = ['partId' => $row['partId'], 'distributor' => $row['distributor'],
@@ -71,19 +122,32 @@ final readonly class PartDistributorDataRefresh
 				}
 				$updated++;
 			}
-			foreach (array_keys($selected) as $key) {
-				if (!isset($seen[$key])) {
-					$skipped[] = ['partId' => (int)explode(':', $key, 2)[0], 'distributor' => '',
-						'reason' => 'Field no longer matches the preview'];
-				}
-			}
 			$this->em->flush();
 			$connection->commit();
 		} catch (\Throwable $error) {
 			$connection->rollBack();
 			throw $error;
 		}
+		$this->previewCache->deleteItem('preview_' . $previewId);
 		return ['updated' => $updated, 'skipped' => $skipped];
+	}
+
+	private function currentValue(Part|PartDistributor $target, string $field): mixed
+	{
+		if ($target instanceof PartDistributor) {
+			return match ($field) {
+				'pricing' => ['priceBreaks' => $target->getPriceBreaks(), 'price' => $target->getPrice(), 'currency' => $target->getCurrency()],
+				'rohsStatus' => $target->getRohsStatus(),
+				'assemblyClass' => $target->getAssemblyClass(),
+				default => null
+			};
+		}
+		return match ($field) {
+			'name' => $target->getName(),
+			'description' => $target->getDescription(),
+			'catalogPackage' => $target->getCatalogPackage(),
+			default => null
+		};
 	}
 
 	/** @param list<int> $partIds */
@@ -201,7 +265,7 @@ final readonly class PartDistributorDataRefresh
 						'defaultSelected' => false,
 						'fingerprint' => hash('sha256', json_encode([$data, $savedManufacturers], JSON_THROW_ON_ERROR))
 					];
-					$updates[$key] = [$part, 'offer', $data];
+					$updates[$key] = [$part, 'offer', $data, null];
 					$this->addDiscoveredPartChange($part, $sources[strtolower($source)], $sku,
 						'Description', 'description', $part->getDescription(), $details->description,
 						$rows, $updates, $unchanged);
@@ -236,7 +300,7 @@ final readonly class PartDistributorDataRefresh
 			return;
 		}
 		$rows[] = $row;
-		$updates[$key] = [$part, $field, $proposed];
+		$updates[$key] = [$part, $field, $proposed, $current];
 	}
 
 	private function manufacturerMatches(string $name, array $knownNames): bool
@@ -346,7 +410,7 @@ final readonly class PartDistributorDataRefresh
 				return;
 			}
 			$rows[] = $row;
-			$updates[$key] = [$target, $field, $proposed];
+			$updates[$key] = [$target, $field, $proposed, $current];
 		};
 		$add($part, 'name', 'Name', $part->getName(), $details->manufacturerPartNumber);
 		$add($part, 'description', 'Description', $part->getDescription(), $details->description);

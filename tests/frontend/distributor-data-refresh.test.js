@@ -62,11 +62,12 @@ assert.equal(dialog.previewGrid.bufferedRenderer, false);
 dialog.loadPreview();
 assert.equal(request.url, '/api/parts/distributor-data/preview');
 assert.deepEqual(Array.from(request.jsonData.parts), ['/api/parts/226']);
-request.success.call(dialog, {responseText: JSON.stringify({rows: [
+request.success.call(dialog, {responseText: JSON.stringify({previewId: 'a'.repeat(48), rows: [
   {key: '226:3:rohsStatus', fingerprint: 'a'.repeat(64), defaultSelected: true},
   {key: '226:3:description', fingerprint: 'b'.repeat(64), defaultSelected: false}
 ], unchanged: [{partName: 'SR6863D', label: 'Catalog package', current: 'SOT-23'}]})});
 assert.equal(selected.length, 1);
+assert.equal(dialog.previewId, 'a'.repeat(48));
 assert.equal(dialog.unchangedGrid.hidden, false);
 assert.equal(dialog.unchangedGrid.height, 92);
 assert.equal(dialog.unchangedGrid.bufferedRenderer, false);
@@ -77,6 +78,7 @@ assert.equal(request.url, '/api/parts/distributor-data/apply');
 assert.deepEqual(Object.fromEntries(Object.entries(request.jsonData.selected)), {
   '226:3:rohsStatus': 'a'.repeat(64)
 });
+assert.equal(request.jsonData.previewId, 'a'.repeat(48));
 dialog.bbar[0].handler.call(dialog);
 assert.equal(selected.length, 2);
 dialog.bbar[1].handler.call(dialog);

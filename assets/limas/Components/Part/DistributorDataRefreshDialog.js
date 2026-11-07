@@ -7,6 +7,7 @@ Ext.define('Limas.Components.Part.DistributorDataRefreshDialog', {
 	layout: 'border',
 	parts: null,
 	onSuccess: null,
+	previewId: null,
 
 	initComponent: function () {
 		this.previewStore = Ext.create('Ext.data.Store', {
@@ -77,6 +78,7 @@ Ext.define('Limas.Components.Part.DistributorDataRefreshDialog', {
 	},
 
 	loadPreview: function () {
+		this.previewId = null;
 		this.setLoading(i18n('Loading distributor data…'));
 		Ext.Ajax.request({
 			url: Limas.getBasePath() + '/api/parts/distributor-data/preview',
@@ -84,6 +86,7 @@ Ext.define('Limas.Components.Part.DistributorDataRefreshDialog', {
 			success: function (response) {
 				this.setLoading(false);
 				let result = Ext.decode(response.responseText);
+				this.previewId = result.previewId || null;
 				this.previewStore.loadData(result.rows || []);
 				let unchanged = result.unchanged || [];
 				this.unchangedStore.loadData(unchanged);
@@ -114,7 +117,8 @@ Ext.define('Limas.Components.Part.DistributorDataRefreshDialog', {
 		this.setLoading(i18n('Updating distributor data…'));
 		Ext.Ajax.request({
 			url: Limas.getBasePath() + '/api/parts/distributor-data/apply',
-			method: 'POST', timeout: 180000, jsonData: {parts: this.parts, selected: selected}, scope: this,
+			method: 'POST', timeout: 180000,
+			jsonData: {parts: this.parts, selected: selected, previewId: this.previewId}, scope: this,
 			success: function (response) {
 				this.setLoading(false);
 				let result = Ext.decode(response.responseText);

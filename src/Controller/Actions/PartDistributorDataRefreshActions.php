@@ -30,8 +30,12 @@ final readonly class PartDistributorDataRefreshActions
 		if ($ids === null) return new JsonResponse(['error' => 'Select 1 to 100 parts.'], 400);
 		$body = json_decode($request->getContent(), true);
 		$selected = $body['selected'] ?? null;
+		$previewId = $body['previewId'] ?? null;
 		if (!is_array($selected) || count($selected) > 2000) {
 			return new JsonResponse(['error' => 'Invalid field selection.'], 400);
+		}
+		if (!is_string($previewId) || !preg_match('/^[a-f0-9]{48}$/', $previewId)) {
+			return new JsonResponse(['error' => 'Missing or invalid preview ID. Refresh the preview.'], 400);
 		}
 		foreach ($selected as $key => $fingerprint) {
 			if (!is_string($key) || !preg_match('/^[1-9][0-9]*:(?:0|[1-9][0-9]*):[a-zA-Z0-9]+$/', $key)
@@ -40,9 +44,11 @@ final readonly class PartDistributorDataRefreshActions
 			}
 		}
 		try {
-			return new JsonResponse($this->refresh->apply($ids, $selected));
+			return new JsonResponse($this->refresh->apply($ids, $selected, $previewId));
 		} catch (\InvalidArgumentException $error) {
 			return new JsonResponse(['error' => $error->getMessage()], 404);
+		} catch (\RuntimeException $error) {
+			return new JsonResponse(['error' => $error->getMessage()], 409);
 		}
 	}
 
